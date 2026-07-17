@@ -423,6 +423,7 @@ def ouvrir(parent):
     def enregistrer():
 
      client = entrees["Client"].get().strip()
+     nonlocal vehicule_selectionne
 
      if client == "":
         messagebox.showwarning(
@@ -458,16 +459,55 @@ def ouvrir(parent):
             entrees["Immatriculation"].get().strip(),
         )
      )
-
-     if cur.fetchone():
+     doublon=cur.fetchone()
+     if doublon:
+      if vehicule_selectionne is None or doublon[0]!=vehicule_selectionne:
         conn.close()
         messagebox.showwarning(
             "FMS Manager",
             "Cette immatriculation existe déjà."
         )
         return
-     cur.execute("""
-        INSERT INTO vehicules(
+     if vehicule_selectionne is not None:
+
+         cur.execute("""
+            UPDATE vehicules
+            SET
+                client_id=?,
+                immatriculation=?,
+                marque=?,
+                modele=?,
+                version=?,
+                motorisation=?,
+                carburant=?,
+                boite=?,
+                annee=?,
+                kilometrage=?,
+                vin=?,
+                couleur=?
+            WHERE id=?
+        """, (
+
+            client_id,
+            entrees["Immatriculation"].get().strip(),
+            entrees["Marque"].get().strip(),
+            entrees["Modèle"].get().strip(),
+            entrees["Version"].get().strip(),
+            entrees["Motorisation"].get().strip(),
+            entrees["Carburant"].get().strip(),
+            entrees["Boîte"].get().strip(),
+            entrees["Année"].get().strip(),
+            entrees["Kilométrage"].get().strip(),
+            entrees["VIN"].get().strip(),
+            entrees["Couleur"].get().strip(),
+            vehicule_selectionne
+
+        ))
+
+     else:
+
+          cur.execute("""
+            INSERT INTO vehicules(
             client_id,
             immatriculation,
             marque,
@@ -480,21 +520,21 @@ def ouvrir(parent):
             kilometrage,
             vin,
             couleur
-        )
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-     """, (
-        client_id,
-        entrees["Immatriculation"].get().strip(),
-        entrees["Marque"].get().strip(),
-        entrees["Modèle"].get().strip(),
-        entrees["Version"].get().strip(),
-        entrees["Motorisation"].get().strip(),
-        entrees["Carburant"].get().strip(),
-        entrees["Boîte"].get().strip(),
-        entrees["Année"].get().strip(),
-        entrees["Kilométrage"].get().strip(),
-        entrees["VIN"].get().strip(),
-        entrees["Couleur"].get().strip()
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            client_id,
+            entrees["Immatriculation"].get().strip(),
+            entrees["Marque"].get().strip(),
+            entrees["Modèle"].get().strip(),
+            entrees["Version"].get().strip(),
+            entrees["Motorisation"].get().strip(),
+            entrees["Carburant"].get().strip(),
+            entrees["Boîte"].get().strip(),
+            entrees["Année"].get().strip(),
+            entrees["Kilométrage"].get().strip(),
+            entrees["VIN"].get().strip(),
+            entrees["Couleur"].get().strip()
      ))
 
      conn.commit()
