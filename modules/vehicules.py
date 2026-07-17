@@ -183,7 +183,9 @@ def ouvrir(parent):
         hover_color="#b00000"
     )
     bouton_recherche.pack(side="right", padx=5)
+    
 
+    
     colonnes = (
         "Client",
         "Immatriculation",
@@ -249,7 +251,16 @@ def ouvrir(parent):
         height=170
     )
 
-    photo_label.pack(expand=True)
+    bouton_photo = ctk.CTkButton(
+        photo_frame,
+     text="📷 Choisir une photo",
+     command=lambda:choisir_photo(),
+     fg_color="#c62828",
+     hover_color="#b71c1c"
+     )
+
+    bouton_photo.pack(pady=(5,10 ))
+
 
     # ---------- Observations ----------
 
@@ -348,11 +359,27 @@ def ouvrir(parent):
  # ==========================================
     # Véhicule sélectionné
     # ==========================================
-
+    
     vehicule_selectionne = None
+    photo_actuelle=None
+    chemin_photo=""
     # ==========================================
     # Sélection d'un véhicule
     # ==========================================
+
+    def choisir_photo():
+        nonlocal chemin_photo
+
+        fichier = filedialog.askopenfilename(
+            title="Choisir une photo",
+            filetypes=[
+                ("Images", "*.png *.jpg *.jpeg *.bmp"),
+                ("Tous les fichiers", "*.*")
+            ]
+        )
+
+        if fichier:
+            chemin_photo = fichier
 
     def selectionner_vehicule(event):
 
