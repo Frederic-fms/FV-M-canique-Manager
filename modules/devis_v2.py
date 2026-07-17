@@ -1,10 +1,7 @@
 import customtkinter as ctk
 import sqlite3
-
 from tkinter import messagebox
 from datetime import datetime
-
-from modules import pdf_manager
 
 
 class DevisManager:
@@ -16,64 +13,53 @@ class DevisManager:
         self.conn = sqlite3.connect("fms_manager.db")
         self.cur = self.conn.cursor()
 
-        self.devis_selectionne = None
-
-        self.lignes = []
-
+        self.lignes=[]
         self.creer_fenetre()
+        
 
     def creer_fenetre(self):
 
-     self.fenetre = ctk.CTkToplevel(self.parent)
-     self.fenetre.title("FMS Manager V2 - Gestion des devis")
-     self.fenetre.geometry("1450x850")
+        self.fenetre = ctk.CTkToplevel(self.parent)
+        self.fenetre.title("FMS Manager V2 - Gestion des devis")
+        self.fenetre.geometry("1500x900")
+        self.fenetre.grab_set()
 
-     self.fenetre.grab_set()
+        titre = ctk.CTkLabel(
+            self.fenetre,
+            text="Gestion des devis",
+            font=("Arial", 28, "bold")
+        )
+        titre.pack(pady=15)
 
-     titre = ctk.CTkLabel(
-        self.fenetre,
-        text="Gestion des devis",
-        font=("Arial", 28, "bold")
-     )
+        self.principal = ctk.CTkFrame(self.fenetre)
+        self.principal.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=15
+        )
 
-     titre.pack(pady=15)
+        self.gauche = ctk.CTkScrollableFrame(
+            self.principal,
+            width=520
+        )
 
-     self.principal = ctk.CTkFrame(self.fenetre)
+        self.gauche.pack(
+            side="left",
+            fill="both",
+            padx=(0, 10)
+        )
 
-     self.principal.pack(
-        fill="both",
-        expand=True,
-        padx=15,
-        pady=10
-     )
+        self.droite = ctk.CTkFrame(self.principal)
 
-     self.gauche = ctk.CTkFrame(
-        self.principal,
-        width=430
-     )
-
-     self.gauche.pack(
-        side="left",
-        fill="y",
-        padx=(0,10)
-     )
-
-     self.droite = ctk.CTkFrame(
-        self.principal
-     )
-
-     self.droite.pack(
-        side="right",
-        fill="both",
-        expand=True
-     )
-
-     self.creer_formulaire()
-     self.creer_liste()
+        self.droite.pack(
+            side="right",
+            fill="both",
+            expand=True
+        )
+        self.creer_formulaire()
 
     def creer_formulaire(self):
-
-     self.entrees = {}
 
      champs = [
         "Numéro devis",
@@ -83,342 +69,201 @@ class DevisManager:
         "Montant HT",
         "TVA",
         "Montant TTC"
-     ]
+    ]
+
+     self.entrees = {}
 
      for champ in champs:
 
         ctk.CTkLabel(
             self.gauche,
-            text=champ
-        ).pack(anchor="w", padx=10, pady=(8, 0))
+            text=champ,
+            font=("Arial", 14, "bold")
+        ).pack(anchor="w", padx=10, pady=(10, 2))
 
-        entree = ctk.CTkEntry(
-            self.gauche,
-            width=390
-        )
+        if champ == "Client":
+         self.cur.execute("SELECT nom FROM clients ORDER BY nom")
+         clients = [c[0] for c in self.cur.fetchall()]
+         print(clients)
 
-        entree.pack(padx=10)
+         entree = ctk.CTkComboBox(
+           self.gauche,
+           values=clients,
+           width=450,
+           command=self.client_selectionne)
+
+        elif champ == "Immatriculation":
+          entree = ctk.CTkEntry(
+          self.gauche,
+          width=450
+         )
+
+        else:
+          entree = ctk.CTkEntry(
+          self.gauche,
+          width=450
+         )
+
+
+        entree.pack(padx=10, pady=(0, 8))
 
         self.entrees[champ] = entree
 
-     # Date du jour
      self.entrees["Date"].insert(
         0,
         datetime.now().strftime("%d/%m/%Y")
-     )
-
-     # Ces champs seront calculés automatiquement
+    )
      self.entrees["Montant HT"].configure(state="readonly")
      self.entrees["TVA"].configure(state="readonly")
      self.entrees["Montant TTC"].configure(state="readonly")
 
-     # ==========================
-     # PRESTATIONS
-     # ==========================
-
      ctk.CTkLabel(
         self.gauche,
-        text="Prestations",
-        font=("Arial", 15, "bold")
-     ).pack(anchor="w", padx=10, pady=(20, 5))
+        text="Prestations",  
+        font=("Arial",16,"bold")
+    ).pack(anchor="w",padx=10,pady=(20,10))  
 
-     self.tableau = ctk.CTkFrame(self.gauche)
-     self.tableau.pack(fill="x", padx=10)
-
-     entetes = [
-        ("Désignation", 0),
-        ("Qté", 1),
-        ("Prix TTC", 2),
-        ("Total", 3)
+     entete=ctk.CTkFrame(self.gauche,
+            fg_color="transparent")
+     entete.pack(fill="x",padx=10)
+     titres=[
+        ("Référence",90),
+        ("Désignation",180),
+        ("Qté",50),
+        ("PU HT",70),
+        ("TVA",60),
+        ("Total",80)
      ]
 
-     for texte, colonne in entetes:
+     for texte,largeur in titres:
+        ctk.CTkLabel(
+           entete,
+           text=texte,
+           width=largeur
+        ).pack(side="left",padx=2)
 
-         ctk.CTkLabel(
-            self.tableau,
-            text=texte,
-            font=("Arial", 11, "bold")
-         ).grid(
-            row=0,
-            column=colonne,
-            padx=5,
-            pady=5
-         )
-        # =====================================
-        # Première ligne de prestation
-        # =====================================
+     self.frame_lignes = ctk.CTkFrame(self.gauche, fg_color="transparent")
+     self.frame_lignes.pack(fill="x", padx=10, pady=5)
 
-         self.designation = ctk.CTkEntry(
-         self.tableau,
-         width=180
-         )
-         self.designation.grid(row=1, column=0, padx=5, pady=5)
+     ligne = ctk.CTkFrame(self.frame_lignes, fg_color="transparent")
+     ligne.pack(fill="x", pady=2)
 
-         self.qte = ctk.CTkEntry(
-         self.tableau,
-         width=50
-         )
-         self.qte.insert(0, "1")
-         self.qte.grid(row=1, column=1, padx=5)
+     ref = ctk.CTkEntry(ligne, width=90)
+     ref.pack(side="left", padx=2)
 
-         self.prix = ctk.CTkEntry(
-         self.tableau,
-         width=80
-         )
-         self.prix.grid(row=1, column=2, padx=5)
+     designation = ctk.CTkEntry(ligne, width=180)
+     designation.pack(side="left", padx=2)
 
-         self.total = ctk.CTkLabel(
-         self.tableau,
-         text="0.00 €",
-         width=80
-         )
-         self.total.grid(row=1, column=3, padx=5)
-         self.qte.bind("<KeyRelease>",
-         self.calculer_total)
-         self.prix.bind("<KeyRelease>",
-         self.calculer_total)
+     qte = ctk.CTkEntry(ligne, width=50)
+     qte.pack(side="left", padx=2)
 
-         self.btn_ajouter = ctk.CTkButton(
-         self.gauche,
-         text="➕ Ajouter une prestation",
-         command=self.ajouter_ligne
-         )
+     pu = ctk.CTkEntry(ligne, width=70)
+     pu.pack(side="left", padx=2)
 
-         self.btn_ajouter.pack(pady=10)
-   
-         self.btn_enregistrer = ctk.CTkButton(
-         self.gauche,
-         text="💾 Enregistrer",
-         command=self.enregistrer
-         )
-         self.btn_enregistrer.pack(pady=5)
+     tva = ctk.CTkEntry(ligne, width=60)
+     tva.pack(side="left", padx=2)
 
-         self.btn_pdf = ctk.CTkButton(
-         self.gauche,
-         text="📄 Générer le PDF",
-         command=self.creer_pdf
-)
-         self.btn_pdf.pack(pady=5)
+     total = ctk.CTkEntry(ligne, width=80, state="readonly")
+     total.pack(side="left", padx=2)
 
-    def enregistrer(self):
-     import sqlite3
-
-     conn = sqlite3.connect("fms_manager.db")
-     cur = conn.cursor()
-
-     cur.execute("""
-        INSERT INTO devis(
-            numero,
-            date,
-            client,
-            immatriculation,
-            montant_ht,
-            tva,
-            montant_ttc,
-            travaux
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     """, (
-        self.entrees["Numéro devis"].get(),
-        self.entrees["Date"].get(),
-        self.entrees["Client"].get(),
-        self.entrees["Immatriculation"].get(),
-        float(self.entrees["Montant HT"].get().replace(",", ".")),
-        float(self.entrees["TVA"].get().replace(",", ".")),
-        float(self.entrees["Montant TTC"].get().replace(",", ".")),
-
-        self.designation.get()
-     ))
-
-     conn.commit()
-     conn.close()
-
-     from tkinter import messagebox
-     messagebox.showinfo(
-        "FMS Manager",
-        "Le devis à été enregistré avec succès."
+     self.lignes.append({
+         "ref":ref,
+         "designation":
+     designation,
+         "qte": qte,
+         "pu": pu,
+         "tva": tva,
+         "total": total
+     })
+     qte.bind("<KeyRelease>",
+              lambda e:
+              self.calculer_totaux())
+     pu.bind("<KeyRelease>",lambda e:
+             self.calculer_totaux())
+     
+     self.bouton_ajouter=ctk.CTkButton(
+        self.gauche,
+        text="+ Ajouter une ligne",
+        command=self.ajouter_ligne
      )
+     self.bouton_ajouter.pack(anchor="w",padx=10, pady=10)
+     
+    def calculer_totaux(self):
+        total_ht = 0
 
-    def calculer_total(self, event=None):
+        for ligne in self.lignes:
+            try:
+                qte =float(ligne["qte"].get().replace(",", ".") or 0)
+                pu = float(ligne["pu"].get().replace(",", ".") or 0)
 
-     try:
-         qte = float(self.qte.get().replace(",", "."))
-     except ValueError:
-         qte = 0
+                total = qte * pu
 
-     try:
-         prix = float(self.prix.get().replace(",", "."))
-     except ValueError:
-         prix = 0
+                ligne["total"].configure(state="normal")
+                ligne["total"].delete(0, "end")
+                ligne["total"].insert(0, f"{total:.2f}")
+                ligne["total"].configure(state="readonly")
 
-     total = qte * prix
+                total_ht += total
 
-     self.total.configure(text=f"{total:.2f} €")
+            except ValueError:
+              pass
 
-     # Auto-entrepreneur
-     ht = total
-     tva = 0
-     ttc = total
+        tva = total_ht * 0.20
+        ttc = total_ht + tva
 
-     for champ, valeur in [
-        ("Montant HT", ht),
-        ("TVA", tva),
-        ("Montant TTC", ttc)
-     ]:
-        self.entrees[champ].configure(state="normal")
-        self.entrees[champ].delete(0, "end")
-        self.entrees[champ].insert(0, f"{valeur:.2f}")
-        self.entrees[champ].configure(state="readonly")
+        self.entrees["Montant HT"].configure(state="normal")
+        self.entrees["Montant HT"].delete(0, "end")
+        self.entrees["Montant HT"].insert(0, f"{total_ht:.2f}")
+        self.entrees["Montant HT"].configure(state="readonly")
 
-    def enregistrer(self):
-       print("Enregistrement du devis...")
-       numero = self.entrees["Numéro devis"].get()
-       date = self.entrees["Date"].get()
-       client = self.entrees["Client"].get()
-       immatriculation = self.entrees["Immatriculation"].get()
+        self.entrees["TVA"].configure(state="normal")
+        self.entrees["TVA"].delete(0, "end")
+        self.entrees["TVA"].insert(0, f"{tva:.2f}")
+        self.entrees["TVA"].configure(state="readonly")
 
-       travaux = ""
-
-       for ligne in self.lignes:
-        designation = ligne["designation"].get()
-       qte = ligne["qte"].get()
-       prix = ligne["prix"].get()
-
-       if designation.strip():
-        travaux += f"{designation} | Qté:{qte} | Prix:{prix} €\n"
+        self.entrees["Montant TTC"].configure(state="normal")
+        self.entrees["Montant TTC"].delete(0, "end")
+        self.entrees["Montant TTC"].insert(0, f"{ttc:.2f}")
+        self.entrees["Montant TTC"].configure(state="readonly")
 
 
-       montant_ht = self.entrees["Montant HT"].get()
-       tva = self.entrees["TVA"].get()
-       montant_ttc = self.entrees["Montant TTC"].get()
-
-       conn = sqlite3.connect("fms_manager.db")
-       cur = conn.cursor()
-
-       cur.execute("""
-       INSERT INTO devis(
-           numero,
-           date,
-           client,
-           immatriculation,
-           montant_ht,
-           tva,
-           montant_ttc,
-           travaux
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-           numero,
-           date,
-           client,
-           immatriculation,
-           montant_ht,
-           tva,
-           montant_ttc,
-           travaux
-         ))
-
-       conn.commit()
-       conn.close()
-       print("Devis enregistré avec succès.")
+        
 
     def ajouter_ligne(self):
 
-     ligne = len(self.lignes) + 2
+        ligne = ctk.CTkFrame(self.frame_lignes, fg_color="transparent")
+        ligne.pack(fill="x", pady=2)
+        self.bouton_ajouter.pack_forget()
+        self.bouton_ajouter.pack(anchor="w",padx=10,pady=10)
 
-     designation = ctk.CTkEntry(
-         self.tableau,
-         width=180
-     )
-     designation.grid(row=ligne, column=0, padx=5, pady=2)
+        ctk.CTkEntry(ligne, width=90).pack(side="left", padx=2)
+        ctk.CTkEntry(ligne, width=180).pack(side="left", padx=2)
+        ctk.CTkEntry(ligne, width=50).pack(side="left", padx=2)
+        ctk.CTkEntry(ligne, width=70).pack(side="left", padx=2)
+        ctk.CTkEntry(ligne, width=60).pack(side="left", padx=2)
 
-     qte = ctk.CTkEntry(
-         self.tableau,
-         width=50
-     )
-     qte.insert(0, "1")
-     qte.grid(row=ligne, column=1)
+        ctk.CTkEntry(
+            ligne,
+            width=80,
+            state="readonly"
+        ).pack(side="left", padx=2)
 
-     prix = ctk.CTkEntry(
-         self.tableau,
-         width=80
-     )
-     prix.grid(row=ligne, column=2)
+    def client_selectionne(self, client):
 
-     total = ctk.CTkLabel(
-         self.tableau,
-         text="0.00 €",
-         width=80
-     )
-     total.grid(row=ligne, column=3)
-
-     self.lignes.append({
-         "designation": designation,
-         "qte": qte,
-         "prix": prix,
-         "total": total
-     })
-
-     qte.bind("<KeyRelease>", self.calculer_total)
-     prix.bind("<KeyRelease>", self.calculer_total)
-
-    def creer_liste(self):
-
-     ctk.CTkLabel(
-         self.droite,
-         text="Liste des devis",
-         font=("Arial", 18, "bold")
-     ).pack(pady=10)
-
-     self.liste = ctk.CTkTextbox(
-         self.droite,
-         width=850,
-         height=650
+       self.cur.execute("""
+                        SELECT v.immatriculation
+            FROM vehicules v JOIN clients c ON v.client_id= c.id
+        WHERE c.nom=?
+        limit 1""",
+        (client,)
      )
 
-     self.liste.pack(
-         fill="both",
-         expand=True,
-         padx=10,
-         pady=10
-     )
+       resultat = self.cur.fetchone()
 
-     self.charger_liste()
+       if resultat:
+        self.entrees["Immatriculation"].delete(0, "end")
+        self.entrees["Immatriculation"].insert(0, resultat[0])
 
-    def charger_liste(self):
 
-     self.liste.delete("1.0", "end")
-
-     self.cur.execute("""
-        SELECT
-            numero,
-            date,
-            client,
-            montant_ttc
-        FROM devis
-        ORDER BY id DESC
-     """)
-
-     devis = self.cur.fetchall()
-
-     if not devis:
-
-        self.liste.insert(
-            "end",
-            "Aucun devis enregistré."
-        )
-
-        return
-
-     for numero, date, client, montant in devis:
-
-        self.liste.insert(
-            "end",
-            f"{numero} | {date} | {client} | {montant:.2f} €\n"
-        )
 def ouvrir(parent):
-   fenetre=ctk.CTkToplevel(parent)
-   DevisManager(fenetre)        
-         
-
-
+    DevisManager(parent)
