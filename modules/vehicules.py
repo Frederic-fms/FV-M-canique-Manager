@@ -1,16 +1,10 @@
 import customtkinter as ctk
 from tkinter import ttk
 from tkinter import messagebox
-from tkinter import filedialog
+
 
 import sqlite3
-import shutil
-import os
 
-try:
-    from PIL import Image
-except ImportError:
-    Image = None
 
 
 def ouvrir(parent):
@@ -222,46 +216,6 @@ def ouvrir(parent):
         pady=15
     )
 
-    # ---------- Photo ----------
-
-    photo_frame = ctk.CTkFrame(
-        bas,
-        width=300,
-        height=240
-    )
-
-    photo_frame.pack(
-        side="left",
-        padx=(0,10)
-    )
-
-    photo_frame.pack_propagate(False)
-
-    ctk.CTkLabel(
-        photo_frame,
-        text="Photo",
-        font=("Arial",20,"bold")
-    ).pack(pady=10)
-
-    photo_label = ctk.CTkLabel(
-        photo_frame,
-        text="📷\n\nAucune photo",
-        font=("Arial",18),
-        width=260,
-        height=170
-    )
-
-    bouton_photo = ctk.CTkButton(
-        photo_frame,
-     text="📷 Choisir une photo",
-     command=lambda:choisir_photo(),
-     fg_color="#c62828",
-     hover_color="#b71c1c"
-     )
-
-    bouton_photo.pack(pady=(5,10 ))
-
-
     # ---------- Observations ----------
 
     observations_frame = ctk.CTkFrame(bas)
@@ -313,6 +267,17 @@ def ouvrir(parent):
         if clients:
             entrees["Client"].set(clients[0])
     # ==========================================
+    # Vérification de la base de données
+    # ==========================================
+
+    def verifier_base():
+        conn = sqlite3.connect("fms_manager.db")
+        cur = conn.cursor()
+
+        conn.commit()
+        conn.close()
+           
+    # ==========================================
     # Chargement des véhicules
     # ==========================================
 
@@ -361,25 +326,10 @@ def ouvrir(parent):
     # ==========================================
     
     vehicule_selectionne = None
-    photo_actuelle=None
-    chemin_photo=""
+    
     # ==========================================
     # Sélection d'un véhicule
     # ==========================================
-
-    def choisir_photo():
-        nonlocal chemin_photo
-
-        fichier = filedialog.askopenfilename(
-            title="Choisir une photo",
-            filetypes=[
-                ("Images", "*.png *.jpg *.jpeg *.bmp"),
-                ("Tous les fichiers", "*.*")
-            ]
-        )
-
-        if fichier:
-            chemin_photo = fichier
 
     def selectionner_vehicule(event):
 
@@ -442,7 +392,42 @@ def ouvrir(parent):
             entrees[nom].delete(0, "end")
             entrees[nom].insert(0, "" if ligne[i] is None else ligne[i])
 
-           
+    def supprimer():
+        nonlocal vehicule_selectionne
+
+        if vehicule_selectionne is None:
+            messagebox.showwarning(
+                "FMS Manager",
+                "Veuillez sélectionner un véhicule."
+            )
+            return
+
+        if not messagebox.askyesno(
+            "Confirmation",
+            "Voulez-vous vraiment supprimer ce véhicule ?"
+        ):
+            return
+
+        conn = sqlite3.connect("fms_manager.db")
+        cur = conn.cursor()
+
+        cur.execute(
+            "DELETE FROM vehicules WHERE id=?",
+            (vehicule_selectionne,)
+        )
+
+        conn.commit()
+        conn.close()
+
+        vehicule_selectionne = None
+
+        charger_vehicules()
+
+        messagebox.showinfo(
+            "FMS Manager",
+            "Véhicule supprimé avec succès."
+        )
+
     # ==========================================
     # Enregistrer un véhicule
     # ==========================================
@@ -561,7 +546,7 @@ def ouvrir(parent):
             entrees["Année"].get().strip(),
             entrees["Kilométrage"].get().strip(),
             entrees["VIN"].get().strip(),
-            entrees["Couleur"].get().strip()
+            entrees["Couleur"].get().strip(),
      ))
 
      conn.commit()
@@ -585,6 +570,8 @@ def ouvrir(parent):
     # Initialisation
     # ==========================================
     bouton_enregistrer.configure(command=enregistrer)
+    bouton_supprimer.configure(command=supprimer)
     liste.bind("<<TreeviewSelect>>",selectionner_vehicule)
+    verifier_base()
     charger_clients()
     charger_vehicules()
