@@ -58,6 +58,43 @@ def creer_base():
      tva REAL,
      montant_ttc REAL,
      travaux TEXT
+     statut TEXT DEFAULT 'En attente'
+     )
+     """)
+
+    cur.execute("""
+     CREATE TABLE IF NOT EXISTS factures(
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     numero TEXT,
+     date TEXT,
+     client TEXT,
+     immatriculation TEXT,
+     montant_ht REAL,
+     tva REAL,
+     montant_ttc REAL,
+     acompte REAL DEFAULT 0,
+     reste_a_payer REAL DEFAULT 0,
+     mode_paiement TEXT,
+     statut TEXT DEFAULT 'En attente',
+     travaux TEXT
+     )
+     """)
+
+    cur.execute("""
+     CREATE TABLE IF NOT EXISTS reparations(
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     numero TEXT,
+     date TEXT,
+     client TEXT,
+     immatriculation TEXT,
+     kilometrage INTEGER,
+     travaux_prevus TEXT,
+     travaux_effectues TEXT,
+     temps_main_oeuvre REAL,
+     observations TEXT,
+     statut TEXT DEFAULT 'En attente',
+     devis_id INTEGER,
+     facture_id INTEGER
      )
      """)
 
@@ -66,16 +103,35 @@ def creer_base():
     # ==============================
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS prestations(
+    CREATE TABLE IF NOT EXISTS devis_lignes(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         devis_id INTEGER,
+        reference TEXT,
         designation TEXT,
         qte REAL,
-        prix REAL,
+        pu_ht REAL,
+        tva REAL,
         total REAL,
         FOREIGN KEY(devis_id) REFERENCES devis(id)
     )
     """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS ordres_reparation (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero TEXT,
+        date TEXT,
+        client TEXT,
+        immatriculation TEXT,
+        kilometrage INTEGER,
+        travaux_prevus TEXT,
+        travaux_effectues TEXT,
+        temps_mo REAL,
+        observations TEXT,
+        statut TEXT
+         )
+         """)
+
 
     conn.commit()
     conn.close()
