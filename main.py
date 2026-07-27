@@ -72,7 +72,7 @@ titre.pack(pady=25)
 
 description = ctk.CTkLabel(
     contenu,
-    text="Bienvenue dans FMS Manager V2",
+    text="Bienvenue dans FMS Manager",
     font=("Arial", 18)
 )
 
