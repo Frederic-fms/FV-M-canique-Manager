@@ -82,7 +82,7 @@ description.pack()
 # Fonctions
 # -----------------------------
 def ouvrir_clients():
-    clients.ouvrir(app)
+    clients.ClientManager(app)
 
 def ouvrir_vehicules():
     vehicules.ouvrir(app)

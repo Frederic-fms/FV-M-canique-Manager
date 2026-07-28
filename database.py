@@ -14,9 +14,12 @@ def creer_base():
     cur.execute("""
     CREATE TABLE IF NOT EXISTS clients(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type_client TEXT,
         nom TEXT NOT NULL,
         prenom TEXT,
+        siret TEXT,
         telephone TEXT,
+        telephone2 TEXT,
         email TEXT,
         adresse TEXT,
         code_postal TEXT,

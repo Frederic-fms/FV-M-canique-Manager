@@ -12,7 +12,7 @@ class ReparationManager:
 
         self.fenetre = ctk.CTkToplevel(parent)
         self.fenetre.title("Ordres de réparation")
-        self.fenetre.geometry("1400x800")
+        self.fenetre.geometry("1400x900")
 
         # Cadre gauche
         frame_gauche = ctk.CTkFrame(self.fenetre)
@@ -70,6 +70,73 @@ class ReparationManager:
         ctk.CTkLabel(frame_droit, text="Travaux effectués").pack(anchor="w", padx=10)
         self.txt_travaux_effectues = ctk.CTkTextbox(frame_droit, height=120)
         self.txt_travaux_effectues.pack(fill="x", padx=10, pady=5)
+
+        # ===== Prestations =====
+        frame_prestations = ctk.CTkFrame(frame_droit)
+        frame_prestations.pack(fill="x", padx=10, pady=10)
+
+        ctk.CTkLabel(
+            frame_prestations,
+            text="Prestations",
+            font=("Arial", 12, "bold")
+        ).pack(anchor="w", padx=10, pady=5)
+
+        barre = ctk.CTkFrame(frame_prestations)
+        barre.pack(fill="x", padx=5)
+
+        ctk.CTkButton(
+            barre,
+            text="➕ Ajouter",
+            width=110,
+            command=self.ajouter_prestation
+        ).pack(side="left", padx=2)
+
+        ctk.CTkButton(
+            barre,
+            text="✏ Modifier",
+            width=110,
+            command=self.modifier_prestation
+        ).pack(side="left", padx=2)
+
+        ctk.CTkButton(
+            barre,
+            text="🗑 Supprimer",
+            width=110,
+            command=self.supprimer_prestation
+        ).pack(side="left", padx=2)
+
+        colonnes = (
+            "designation",
+            "quantite",
+            "pu",
+            "total"
+        )
+
+        self.table_prestations = ttk.Treeview(
+            frame_prestations,
+            columns=colonnes,
+            show="headings",
+            height=6
+        )
+
+        self.table_prestations.heading("designation", text="Désignation")
+        self.table_prestations.heading("quantite", text="Qté")
+        self.table_prestations.heading("pu", text="PU HT")
+        self.table_prestations.heading("total", text="Total")
+
+        self.table_prestations.column("designation", width=320)
+        self.table_prestations.column("quantite", width=70, anchor="center")
+        self.table_prestations.column("pu", width=90, anchor="e")
+        self.table_prestations.column("total", width=100, anchor="e")
+
+        self.table_prestations.pack(
+            fill="x",
+            padx=5,
+            pady=5
+        )
+
+
+
 
         ctk.CTkLabel(frame_droit, text="Temps de main-d'œuvre (heures)").pack(anchor="w", padx=10)
         self.entry_temps = ctk.CTkEntry(frame_droit)
@@ -247,6 +314,68 @@ class ReparationManager:
             self.txt_travaux_effectues.get("1.0", "end"),
             self.entry_temps.get()
         )
+    def ajouter_prestation(self):
+
+        fenetre = ctk.CTkToplevel(self.fenetre)
+        fenetre.title("Ajouter une prestation")
+        fenetre.geometry("400x250")
+
+        ctk.CTkLabel(fenetre, text="Désignation").pack(pady=(10, 0))
+        entry_designation = ctk.CTkEntry(fenetre, width=300)
+        entry_designation.pack()
+
+        ctk.CTkLabel(fenetre, text="Quantité").pack(pady=(10, 0))
+        entry_qte = ctk.CTkEntry(fenetre, width=100)
+        entry_qte.insert(0, "1")
+        entry_qte.pack()
+
+        ctk.CTkLabel(fenetre, text="Prix HT").pack(pady=(10, 0))
+        entry_prix = ctk.CTkEntry(fenetre, width=100)
+        entry_prix.pack()
+
+        def valider():
+            try:
+                qte = float(entry_qte.get().replace(",", "."))
+                prix = float(entry_prix.get().replace(",", "."))
+                total = qte * prix
+
+                self.table_prestations.insert(
+                    "",
+                    "end",
+                    values=(
+                        entry_designation.get(),
+                        qte,
+                        f"{prix:.2f}",
+                        f"{total:.2f}"
+                    )
+                )
+
+                fenetre.destroy()
+
+            except ValueError:
+                messagebox.showerror(
+                    "Erreur",
+                    "Valeurs invalides."
+                )
+
+        ctk.CTkButton(
+            fenetre,
+            text="Valider",
+            command=valider
+        ).pack(pady=15)
+
+    def modifier_prestation(self):
+        messagebox.showinfo(
+            "FMS Manager",
+            "La modification sera ajoutée à l'étape suivante."
+        )
+
+    def supprimer_prestation(self):
+
+        selection = self.table_prestations.selection()
+
+        if selection:
+            self.table_prestations.delete(selection[0])
 
 
 def ouvrir(parent):

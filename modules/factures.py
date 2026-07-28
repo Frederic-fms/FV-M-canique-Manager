@@ -3,6 +3,7 @@ import customtkinter as ctk
 import sqlite3
 from tkinter import ttk, messagebox
 from PIL import Image
+from datetime import datetime
 
 
 class FactureManager:
@@ -20,6 +21,10 @@ class FactureManager:
         self.fenetre.configure(fg_color="#464242")
 
         self.creer_interface()
+
+        self.creer_tables()
+        self.generer_numero_facture()
+        self.charger_factures()
 
 
     def creer_interface(self):
@@ -180,20 +185,48 @@ class FactureManager:
         )
         frame_boutons.grid(row=2, column=0, sticky="ew", padx=15, pady=15)
 
-        for texte in [
-            "➕ Nouvelle",
-            "💾 Enregistrer",
-            "🖨 Imprimer PDF",
-            "🗑 Supprimer",
-            "🔄 Actualiser"
-        ]:
-            ctk.CTkButton(
-                frame_boutons,
-                text=texte,
-                height=40,
-                fg_color="#FC0411",
-                hover_color="#BB0214"
-            ).pack(fill="x", pady=4)
+        ctk.CTkButton(
+            frame_boutons,
+              text="➕ Nouvelle",
+              height=40,
+              hover_color="#0233bb",
+              command=self.nouvelle_facture
+              ).pack(fill="x", pady=4)
+
+        ctk.CTkButton(
+            frame_boutons,
+            text="💾 Enregistrer",
+            height=40,
+            fg_color="#fc0411",
+            hover_color="#bb0214",
+            command=self.enregistrer_facture
+        ).pack(fill="x", pady=4)
+
+        ctk.CTkButton(
+            frame_boutons,
+              text="🖨 Imprimer PDF",
+              height=40,
+              fg_color="#fc0411",
+              hover_color="#bb0214",
+              ).pack(fill="x", pady=4)
+
+        ctk.CTkButton(
+            frame_boutons,
+              text="🗑 Supprimer",
+              height=40,
+              fg_color="#fc0411",
+              hover_color="#bb0214",
+              command=self.supprimer_prestation
+              ).pack(fill="x", pady=4)
+
+        ctk.CTkButton(
+            frame_boutons,
+              text="🔄 Actualiser",
+              height=40,
+              fg_color="#fc0411",
+              hover_color="#bb0214",
+              ).pack(fill="x", pady=4)
+
 
         # ==========================
         # COLONNE DROITE
@@ -241,7 +274,7 @@ class FactureManager:
 
         ctk.CTkLabel(frame_infos, text="N° Facture", font=("Arial",10)).grid(row=1,column=0,sticky="w",padx=8)
         ctk.CTkLabel(frame_infos, text="N° OR", font=("Arial",10)).grid(row=1,column=1,sticky="w",padx=8)
-        ctk.CTkLabel(frame_infos, text="Date", font=("Arial",10)).grid(row=1,column=2,sticky="w",padx=8)
+        ctk.CTkLabel(frame_infos, text="Date", font=("Arial",10)).grid(row=1,column=3,sticky="w",padx=8)
 
         self.entry_numero = ctk.CTkEntry(frame_infos, height=24)
         self.entry_or = ctk.CTkEntry(frame_infos, height=24)
@@ -249,15 +282,26 @@ class FactureManager:
 
         self.entry_numero.grid(row=2,column=0,sticky="ew",padx=8,pady=(0,3))
         self.entry_or.grid(row=2,column=1,sticky="ew",padx=8,pady=(0,3))
-        self.entry_date.grid(row=2,column=2,sticky="ew",padx=8,pady=(0,3))
+
+        ctk.CTkButton(
+            frame_infos,
+            text="🔍",
+            width=30,
+            height=24,
+            fg_color="#FC0411",
+            hover_color="#BB0214",
+            command=self.choisir_or
+        ).grid(row=2, column=2, sticky="w", padx=(2, 8), pady=(0,3))
+
+        self.entry_date.grid(row=2,column=3,sticky="ew",padx=8,pady=(0,3))
 
         # ---------- Ligne 2 ----------
 
         ctk.CTkLabel(frame_infos, text="Client", font=("Arial",10)).grid(row=3,column=0,sticky="w",padx=8)
         ctk.CTkLabel(frame_infos, text="Immatriculation", font=("Arial",10)).grid(row=3,column=1,sticky="w",padx=8)
 
-        self.entry_client = ctk.CTkEntry(frame_infos, state="disabled", height=24)
-        self.entry_immat = ctk.CTkEntry(frame_infos, state="disabled", height=24)
+        self.entry_client = ctk.CTkEntry(frame_infos, state="normal", height=24)
+        self.entry_immat = ctk.CTkEntry(frame_infos, state="normal", height=24)
 
         self.entry_client.grid(row=4,column=0,sticky="ew",padx=8,pady=(0,3))
         self.entry_immat.grid(row=4,column=1,sticky="ew",padx=8,pady=(0,3))
@@ -323,7 +367,8 @@ class FactureManager:
             text="➕ Ajouter",
             width=110,
             height=24,
-            fg_color="#FC0411"
+            fg_color="#FC0411",
+            command=self.ajouter_prestation
         ).pack(side="left", padx=(0,3))
 
         ctk.CTkButton(
@@ -331,7 +376,8 @@ class FactureManager:
             text="✏ Modifier",
             width=110,
             height=24,
-            fg_color="#FC0411"
+            fg_color="#FC0411",
+            command=self.modifier_prestation
         ).pack(side="left", padx=(0,3))
 
         ctk.CTkButton(
@@ -487,13 +533,260 @@ class FactureManager:
         )
         self.label_reste.grid(row=2, column=3, sticky="w")
 
+    def creer_tables(self):
+        self.cur.execute("""
+        CREATE TABLE IF NOT EXISTS factures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            numero TEXT UNIQUE,
+            numero_or TEXT,
+            client TEXT,
+            immatriculation TEXT,
+            date_facture TEXT,
+            paiement TEXT,
+            statut TEXT,
+            echeance TEXT,
+            observations TEXT,
+            remise REAL DEFAULT 0,
+            deja_verse REAL DEFAULT 0,
+            total_ht REAL DEFAULT 0,
+            tva REAL DEFAULT 0,
+            total_ttc REAL DEFAULT 0
+        )
+        """)
+
+        self.conn.commit()
+
+    
+    def generer_numero_facture(self):
+
+        annee = datetime.now().year
+
+        self.cur.execute("SELECT COUNT(*) FROM factures")
+
+        numero = self.cur.fetchone()[0] + 1
+
+        numero = f"F{annee}-{numero:06d}"
+
+        self.entry_numero.configure(state="normal")
+        self.entry_numero.delete(0, "end")
+        self.entry_numero.insert(0, numero)
+        self.entry_numero.configure(state="disabled")
+
+    def charger_factures(self):
+
+        for item in self.table_factures.get_children():
+            self.table_factures.delete(item)
+
+        self.cur.execute("""
+            SELECT numero, client, date_facture
+            FROM factures
+            ORDER BY id DESC
+        """)
+
+        for ligne in self.cur.fetchall():
+            self.table_factures.insert("", "end", values=ligne)
+
+    def enregistrer_facture(self):
+
+        self.cur.execute("""
+            INSERT INTO factures
+            (
+                numero,
+                numero_or,
+                client,
+                immatriculation,
+                date_facture,
+                paiement,
+                statut,
+                echeance,
+                observations,
+                remise,
+                deja_verse,
+                total_ht,
+                tva,
+                total_ttc
+            )
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+
+            self.entry_numero.get(),
+            self.entry_or.get(),
+            self.entry_client.get(),
+            self.entry_immat.get(),
+            self.entry_date.get(),
+            self.combo_paiement.get(),
+            self.combo_statut.get(),
+            self.entry_echeance.get(),
+            self.txt_observations.get("1.0", "end").strip(),
+            0,
+            0,
+            0,
+            0,
+            0
+
+        ))
+
+        self.conn.commit()
+
+        messagebox.showinfo(
+            "FMS Manager",
+            "Facture enregistrée avec succès."
+    )
+
+        self.charger_factures()
+        self.generer_numero_facture()
+
+    def ajouter_prestation(self):
+
+        fenetre = ctk.CTkToplevel(self.fenetre)
+        fenetre.title("Nouvelle prestation")
+        fenetre.geometry("450x250")
+
+        ctk.CTkLabel(fenetre, text="Désignation").pack(pady=(10,0))
+        designation = ctk.CTkEntry(fenetre, width=350)
+        designation.pack()
+
+        ctk.CTkLabel(fenetre, text="Quantité").pack(pady=(10,0))
+        quantite = ctk.CTkEntry(fenetre)
+        quantite.insert(0, "1")
+        quantite.pack()
+
+        ctk.CTkLabel(fenetre, text="Prix HT").pack(pady=(10,0))
+        prix = ctk.CTkEntry(fenetre)
+        prix.pack()
+
+        def valider():
+            try:
+                qte = float(quantite.get().replace(",", "."))
+                pu = float(prix.get().replace(",", "."))
+                total = qte * pu
+
+                self.table_prestations.insert(
+                    "",
+                    "end",
+                    values=(
+                        designation.get(),
+                        qte,
+                        f"{pu:.2f}",
+                        f"{total:.2f}"
+                    )
+                )
+                self.calculer_totaux()
+
+                fenetre.destroy()
+
+            except ValueError:
+                messagebox.showerror(
+                    "Erreur",
+                    "Quantité ou prix incorrect."
+                )
+
+        ctk.CTkButton(
+            fenetre,
+            text="Ajouter",
+            command=valider
+        ).pack(pady=20)
+
+    def calculer_totaux(self):
+
+        total_ht = 0
+
+        for item in self.table_prestations.get_children():
+
+            valeurs = self.table_prestations.item(item)["values"]
+
+            total_ht += float(str(valeurs[3]).replace(",", "."))
+
+        tva = total_ht * 0.20
+
+        try:
+            remise = float(self.entry_remise.get().replace(",", "."))
+        except:
+            remise = 0
+
+        total_ttc = total_ht + tva - remise
+
+        try:
+            deja_verse = float(self.entry_deja_verse.get().replace(",", "."))
+        except:
+            deja_verse = 0
+
+        reste = total_ttc - deja_verse
+
+        self.label_ht.configure(text=f"{total_ht:.2f} €")
+        self.label_tva.configure(text=f"{tva:.2f} €")
+        self.label_ttc.configure(text=f"{total_ttc:.2f} €")
+        self.label_reste.configure(text=f"{reste:.2f} €")
+
+    def supprimer_prestation(self):
+
+        selection = self.table_prestations.selection()
+
+        if not selection:
+            messagebox.showwarning(
+                "FMS Manager",
+                "Sélectionnez une prestation."
+            )
+            return
+
+        self.table_prestations.delete(selection[0])
+
+        self.calculer_totaux()
+
+    def modifier_prestation(self):
+
+        messagebox.showinfo(
+            "FMS Manager",
+            "La modification des prestations sera ajoutée à l'étape suivante."
+        )
+
+    def nouvelle_facture(self):
+
+        self.generer_numero_facture()
+
+        self.entry_or.delete(0, "end")
+        self.entry_client.delete(0, "end")
+        self.entry_immat.delete(0, "end")
+        self.entry_date.delete(0, "end")
+        self.entry_echeance.delete(0, "end")
+
+        self.combo_paiement.set("Espèces")
+        self.combo_statut.set("En attente")
+
+        self.entry_remise.delete(0, "end")
+        self.entry_deja_verse.delete(0, "end")
+
+        self.txt_observations.delete("1.0", "end")
+
+        for item in self.table_prestations.get_children():
+            self.table_prestations.delete(item)
+
+        self.label_ht.configure(text="0,00 €")
+        self.label_tva.configure(text="0,00 €")
+        self.label_ttc.configure(text="0,00 €")
+        self.label_reste.configure(text="0,00 €")
+
+    def choisir_or(self):
+        messagebox.showinfo(
+            "Ordres de réparation",
+            "Cette fonction sera disponible lorsque le module OR sera terminé."
+        )
+
+    def charger_depuis_or(self, numero_or, client, immatriculation, observations, temps):
+
+        self.entry_or.delete(0, "end")
+        self.entry_or.insert(0, numero_or)
+
+        self.entry_client.delete(0, "end")
+        self.entry_client.insert(0, client)
+
+        self.entry_immat.delete(0, "end")
+        self.entry_immat.insert(0, immatriculation)
+
+        self.txt_observations.delete("1.0", "end")
+        self.txt_observations.insert("1.0", observations)
 
 
-
-
-
-
-        
 def ouvrir(parent):
     FactureManager(parent)
 
