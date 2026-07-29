@@ -7,6 +7,7 @@ from modules import vehicules
 from modules import devis_v2 as devis
 from modules import factures
 from modules import reparations
+from modules import prestations
 # -----------------------------
 # Configuration
 # -----------------------------
@@ -85,7 +86,7 @@ def ouvrir_clients():
     clients.ClientManager(app)
 
 def ouvrir_vehicules():
-    vehicules.ouvrir(app)
+    vehicules.VehiculeManager(app)
 
 def ouvrir_devis():
     devis.ouvrir(app)
@@ -94,7 +95,10 @@ def ouvrir_factures():
     factures.ouvrir(contenu)
 
 def ouvrir_reparations():
-    reparations.ouvrir(contenu)    
+    reparations.ouvrir(contenu)   
+
+def ouvrir_prestations():
+    prestations.PrestationManager(contenu) 
 # -----------------------------
 # Boutons du menu
 # -----------------------------
@@ -105,6 +109,7 @@ boutons = [
     ("📝 Devis", ouvrir_devis),
     ("💶 Factures", ouvrir_factures),
     ("🔧 Réparations", ouvrir_reparations),
+    ("Prestations", ouvrir_prestations),
     ("📦 Stock", None),
     ("📅 Agenda", None),
     ("⚙ Paramètres", None)

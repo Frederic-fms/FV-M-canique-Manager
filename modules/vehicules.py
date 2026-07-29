@@ -1,577 +1,763 @@
 import customtkinter as ctk
-from tkinter import ttk
-from tkinter import messagebox
-
-
 import sqlite3
+from tkinter import ttk, messagebox
+from PIL import Image
 
 
+class VehiculeManager:
+    def __init__(self, parent, id_client=None):
+        self.parent = parent
+        self.id_client=id_client
 
-def ouvrir(parent):
+        self.conn = sqlite3.connect("fms_manager.db")
+        self.cur = self.conn.cursor()
 
-    fenetre = ctk.CTkToplevel(parent)
-    fenetre.title("Gestion des véhicules")
-    fenetre.geometry("1500x900")
-    fenetre.grab_set()
+        self.creer_table()
 
-    principal = ctk.CTkFrame(
-        fenetre,
-        corner_radius=10
-    )
+        self.fenetre = ctk.CTkToplevel(parent)
+        self.fenetre.title("FMS Manager - Vehicules")
+        self.fenetre.geometry("1600x900")
+        self.fenetre.configure(fg_color="#464242")
 
-    principal.pack(
-        fill="both",
-        expand=True,
-        padx=10,
-        pady=10
-    )
+        self.creer_interface()
+        self.charger_clients()
+        self.charger_vehicules()
 
-    gauche = ctk.CTkFrame(
-        principal,
-        width=400,
-        corner_radius=10
-    )
 
-    gauche.pack(
-        side="left",
-        fill="y",
-        padx=(0,10)
-    )
+    def creer_table(self):
+        self.cur.execute("""
+        CREATE TABLE IF NOT EXISTS vehicules(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER,
+            immatriculation TEXT,
+            marque TEXT,
+            modele TEXT,
+            motorisation TEXT,
+            annee TEXT,
+            carburant TEXT,
+            kilometrage TEXT,
+            vin TEXT,
+            couleur TEXT,
+            mise_en_circulation TEXT,
+            contrôle_technique TEXT,
+            observations TEXT
+        )
+        """)
+        self.conn.commit()
 
-    gauche.pack_propagate(False)
+    def creer_interface(self):
 
-    droite = ctk.CTkFrame(
-        principal,
-        corner_radius=10
-    )
+        # ==========================
+        # EN-TÊTE
+        # ==========================
 
-    droite.pack(
-        side="right",
-        fill="both",
-        expand=True
-    )
+        header = ctk.CTkFrame(
+            self.fenetre,
+            height=80,
+            fg_color="#0A0606",
+            corner_radius=0
+        )
+        header.pack(fill="x")
+        header.pack_propagate(False)
 
-    titre = ctk.CTkLabel(
-        gauche,
-        text="🚗 GESTION DES VÉHICULES",
-        font=("Arial",28,"bold")
-    )
+        try:
+            self.logo = ctk.CTkImage(
+                light_image=Image.open("assets/logo_fms.png"),
+                dark_image=Image.open("assets/logo_fms.png"),
+                size=(150, 120)
+            )
 
-    titre.pack(
-        pady=(20,25)
-    )
-    champs = [
-        "Client",
-        "Immatriculation",
-        "Marque",
-        "Modèle",
-        "Version",
-        "Motorisation",
-        "Carburant",
-        "Boîte",
-        "Année",
-        "Kilométrage",
-        "VIN",
-        "Couleur"
-    ]
+            ctk.CTkLabel(
+                header,
+                image=self.logo,
+                text=""
+            ).pack(side="left", padx=20)
 
-    entrees = {}
+        except Exception:
+            pass
 
-    for champ in champs:
+        titre = ctk.CTkFrame(
+            header,
+            fg_color="transparent"
+        )
+        titre.pack(side="left", padx=10)
 
         ctk.CTkLabel(
-            gauche,
-            text=champ,
-            font=("Arial",15)
-        ).pack(
-            anchor="w",
-            padx=20,
-            pady=(5,0)
+            titre,
+            text="FMS Manager",
+            font=("Arial", 24, "bold")
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            titre,
+            text="Gestion des vehicules",
+            text_color="#D80606",
+            font=("Arial", 15)
+        ).pack(anchor="w")
+
+        # ==========================
+        # CONTENU
+        # ==========================
+
+        self.contenu = ctk.CTkFrame(
+            self.fenetre,
+            fg_color="transparent"
+        )
+        self.contenu.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=15
         )
 
-        if champ == "Client":
+        # ==========================
+        # COLONNE GAUCHE
+        # ==========================
 
-            widget = ctk.CTkComboBox(
-                gauche,
-                values=[],
-                width=340,
-                height=36
-            )
+        self.gauche = ctk.CTkFrame(
+            self.contenu,
+            width=500,
+            fg_color="#0A0606",
+            corner_radius=10
+        )
+        self.gauche.pack(
+            side="left",
+            fill="y",
+            padx=(0, 15)
+        )
+        self.gauche.pack_propagate(False)
 
-        else:
+        ctk.CTkLabel(
+            self.gauche,
+            text="Vehicules",
+            font=("Arial", 22, "bold")
+        ).pack(pady=(15, 10))
 
-            widget = ctk.CTkEntry(
-                gauche,
-                width=340,
-                height=36
-            )
+        self.recherche = ctk.CTkEntry(
+            self.gauche,
+            placeholder_text="Rechercher un vehicule..."
+        )
+        self.recherche.pack(fill="x", padx=15, pady=(0, 10))
+        self.recherche.bind("<KeyRelease>",
+        self.rechercher_vehicule)
 
-        widget.pack(
-            padx=20,
-            pady=(0,8)
+        self.liste = ttk.Treeview(
+            self.gauche,
+            columns=("Immatriculation", "Vehicule"),
+            show="headings",
+            height=22
         )
 
-        entrees[champ] = widget
-    # ==========================================
-    # Barre des boutons
-    # ==========================================
+        self.liste.heading("Immatriculation", text="Immatriculation")
+        self.liste.heading("Vehicule", text="Vehicule")
 
-    barre = ctk.CTkFrame(
-        droite,
-        fg_color="transparent"
-    )
+        self.liste.column("Immatriculation", width=240, anchor="w")
+        self.liste.column("Vehicule", width=130, anchor="center")
 
-    barre.pack(
-        fill="x",
-        padx=15,
-        pady=(15,10)
-    )
+        self.liste.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=(0, 15)
+        )
 
-    bouton_enregistrer = ctk.CTkButton(
-        barre,
-        text="💾 Enregistrer",
-        width=170,
-        height=45,
-        fg_color="#d50000",
-        hover_color="#b00000",
-        font=("Arial",16,"bold")
-    )
-    bouton_enregistrer.pack(side="left", padx=5)
+        self.liste.bind(
+            "<<TreeviewSelect>>",
+            self.selection_vehicule
+        )
 
-    bouton_modifier = ctk.CTkButton(
-        barre,
-        text="✏ Modifier",
-        width=170,
-        height=45,
-        fg_color="#d50000",
-        hover_color="#b00000",
-        font=("Arial",16,"bold")
-    )
-    bouton_modifier.pack(side="left", padx=5)
+        # ==========================
+        # COLONNE DROITE
+        # ==========================
 
-    bouton_supprimer = ctk.CTkButton(
-        barre,
-        text="🗑 Supprimer",
-        width=170,
-        height=45,
-        fg_color="#d50000",
-        hover_color="#b00000",
-        font=("Arial",16,"bold")
-    )
-    bouton_supprimer.pack(side="left", padx=5)
+        self.droite = ctk.CTkFrame(
+            self.contenu,
+            fg_color="#0A0606",
+            corner_radius=10
+        )
+        self.droite.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
 
-    recherche = ctk.CTkEntry(
-        barre,
-        width=300,
-        height=45,
-        placeholder_text="Rechercher..."
-    )
-    recherche.pack(side="right", padx=5)
+        cadre_infos = ctk.CTkFrame(
+            self.droite,
+            fg_color="transparent"
+        )
+        cadre_infos.pack(fill="x", padx=20, pady=20)
 
-    bouton_recherche = ctk.CTkButton(
-        barre,
-        text="🔍",
-        width=55,
-        height=45,
-        fg_color="#d50000",
-        hover_color="#b00000"
-    )
-    bouton_recherche.pack(side="right", padx=5)
-    
+        ctk.CTkLabel(
+            cadre_infos,
+            text="Informations vehicule",
+            font=("Arial", 22, "bold")
+        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 20))
 
-    
-    colonnes = (
-        "Client",
-        "Immatriculation",
-        "Marque",
-        "Modèle",
-        "Version"
-    )
+        self.labels = {}
+        self.entrees = {}
 
-    liste = ttk.Treeview(
-        droite,
-        columns=colonnes,
-        show="headings",
-        height=18
-    )
+        ctk.CTkLabel(
+            cadre_infos,
+            text="Client"
+        ).grid(row=1, column=0,
+               padx=10, pady=5, sticky="w")
 
-    for col in colonnes:
-        liste.heading(col, text=col)
-        liste.column(col, width=180)
+        self.client_combo=ctk.CTkComboBox(
+            cadre_infos,
+            width=260,
+            values=[]
+        )
+        self.client_combo.grid(
+            row=1,
+            column=1,
+            padx=10,
+            pady=5,
+            sticky="ew"
+        )
 
-    liste.pack(
-        fill="both",
-        expand=True,
-        padx=15
-    )
-    # ==========================================
-    # Bas de la fenêtre
-    # ==========================================
+        #Sélection automatique du client
+        if self.id_client:
+            self.cur.execute("SELECT nom, prenom FROM clients WHERE id=?",
+                             (self.id_client,))
+            client=self.cur.fetchone()
+            if client:
+                self.client_combo.set(f"{client[0]}{client[1]}")
 
-    bas = ctk.CTkFrame(droite)
+        champs = [
+            ("Immatriculation", 1, 2),
+            ("Marque",2, 0),
+            ("Modèle", 2, 2),
+            ("Motorisation", 3, 0),
+            ("Année", 3, 2),
+            ("Carburant", 4, 0),
+            ("Kilométrage", 4, 2),
+            ("vin", 5, 0),
+            ("Couleur", 5, 2),
+            ("Mise en circulation", 6, 0),
+            ("Controle technique", 6, 2),
+        ]
 
-    bas.pack(
-        fill="x",
-        padx=15,
-        pady=15
-    )
+        for texte, ligne, colonne in champs:
 
-    # ---------- Observations ----------
+            label=ctk.CTkLabel(
+                cadre_infos,
+                text=texte
+            )
+            label.grid(
+                row=ligne,
+                column=colonne,
+                padx=10,
+                pady=5,
+                sticky="w"
+            )
+            self.labels[texte]=label
 
-    observations_frame = ctk.CTkFrame(bas)
+            entree = ctk.CTkEntry(
+                cadre_infos,
+                width=260
+            )
 
-    observations_frame.pack(
-        side="left",
-        fill="both",
-        expand=True
-    )
+            entree.grid(
+                row=ligne,
+                column=colonne + 1,
+                padx=10,
+                pady=5,
+                sticky="ew"
+            )
 
-    ctk.CTkLabel(
-        observations_frame,
-        text="Observations",
-        font=("Arial",20,"bold")
-    ).pack(pady=10)
+            self.entrees[texte] = entree
 
-    observations = ctk.CTkTextbox(
-        observations_frame,
-        height=190
-    )
+        cadre_infos.grid_columnconfigure(1, weight=1)
+        cadre_infos.grid_columnconfigure(3, weight=1)
 
-    observations.pack(
-        fill="both",
-        expand=True,
-        padx=10,
-        pady=(0,10)
-    )
-    # ==========================================
-    # Chargement des clients
-    # ==========================================
+        ctk.CTkLabel(
+            self.droite,
+            text="Observations",
+            font=("Arial", 18, "bold")
+        ).pack(anchor="w", padx=20)
 
-    def charger_clients():
+        self.observations = ctk.CTkTextbox(
+            self.droite,
+            height=90
+        )
 
-        conn = sqlite3.connect("fms_manager.db")
-        cur = conn.cursor()
+        self.observations.pack(
+            fill="x",
+            padx=20,
+            pady=(5, 8)
+        )
 
-        cur.execute("""
-            SELECT nom
+        # ==========================
+        # BOUTONS
+        # ==========================
+
+        cadre_boutons = ctk.CTkFrame(
+            self.droite,
+            fg_color="transparent"
+        )
+        cadre_boutons.pack(
+            fill="x",
+            padx=20,
+            pady=(10,5)
+        )
+
+        self.btn_nouveau = ctk.CTkButton(
+            cadre_boutons,
+            text="➕ Nouveau",
+            width=100,
+            height=40,
+            corner_radius=10,
+            font=("Arial",15, "bold"),
+            command=self.nouveau_vehicule,
+            fg_color="#1976D2",
+            hover_color="#1565C0",
+            text_color="white"
+        )
+
+        self.btn_nouveau.grid(row=0, column=0, padx=5, pady=5)
+
+        self.btn_enregistrer = ctk.CTkButton(
+            cadre_boutons,
+            text="💾 Enregistrer",
+            width=100,
+            height=40,
+            corner_radius=10,
+            font=("Arial",15, "bold"),
+            command=self.enregistrer_vehicule,
+            fg_color="#2E7D32",
+            hover_color="#1B5E20",
+            text_color="white"
+        )
+        self.btn_enregistrer.grid(row=0, column=1, padx=5, pady=5)
+
+        self.btn_modifier = ctk.CTkButton(
+            cadre_boutons,
+            text="✏ Modifier",
+            width=100,
+            height=40,
+            corner_radius=10,
+            font=("Arial",15, "bold"),
+            command=self.modifier_vehicule,
+            fg_color="#F57C00",
+            hover_color= "#E65100",
+            text_color="white"
+        )
+        self.btn_modifier.grid(row=0, column=2, padx=5, pady=5)
+
+        self.btn_supprimer = ctk.CTkButton(
+            cadre_boutons,
+            text="🗑 Supprimer",
+            width=100,
+            height=40,
+            corner_radius=10,
+            font=("Arial",15, "bold"),
+            command=self.supprimer_vehicule,
+            fg_color="#C62828",
+            hover_color="#B71C1C",
+            text_color="white"
+        )
+        self.btn_supprimer.grid(row=0, column=3, padx=5, pady=5)
+
+        self.btn_actualiser = ctk.CTkButton(
+            cadre_boutons,
+            text="🔄 Actualiser",
+            width=100,
+            height=40,
+            corner_radius=10,
+            font=("Arial",15, "bold"),
+            command=self.charger_vehicules,
+            fg_color="#455A64",
+            hover_color="#37474F",
+            text_color="white"
+        )
+        self.btn_actualiser.grid(row=0, column=4, padx=5, pady=5)
+
+        self.frame_modules=ctk.CTkFrame(
+            self.droite,
+            fg_color="transparent"
+        )
+        self.frame_modules.pack(pady=(5, 10))
+
+        self.btn_vehicules = ctk.CTkButton(
+            self.frame_modules,
+            text="🚗 Vehicules",
+            fg_color="#D80606",
+            hover_color="#B00505",
+            width=130,
+            height=40,
+            corner_radius=10,
+            text_color="white"
+        )
+        self.btn_vehicules.pack(side="left", padx=5)
+
+
+        self.btn_devis = ctk.CTkButton(
+            self.frame_modules,
+            text="📄 Devis",
+            fg_color="#D80606",
+            hover_color="#B00505",
+            width=130,
+            height=40,
+            corner_radius=10,
+            text_color="white"
+        )
+        self.btn_devis.pack(side="left", padx=5)
+
+
+        self.btn_reparation = ctk.CTkButton(
+            self.frame_modules,
+            text="🔧 Réparation",
+            fg_color="#D80606",
+            hover_color="#B00505",
+            width=130,
+            height=40,
+            corner_radius=10,
+            text_color="white"
+        )
+        self.btn_reparation.pack(side="left", padx=5)
+
+
+        self.btn_factures = ctk.CTkButton(
+            self.frame_modules,
+            text="🧾 Factures",
+            fg_color="#D80606",
+            hover_color="#B00505",
+            width=130,
+            height=40,
+            corner_radius=10,
+            text_color="white"
+        )
+        self.btn_factures.pack(side="left", padx=5)
+
+    def charger_clients(self):
+
+        self.cur.execute("""
+            SELECT id, nom, prenom
             FROM clients
             ORDER BY nom
         """)
 
-        clients = [ligne[0] for ligne in cur.fetchall()]
+        self.clients = {}
 
-        conn.close()
+        liste = []
 
-        entrees["Client"].configure(values=clients)
+        for id_client, nom, prenom in self.cur.fetchall():
 
-        if clients:
-            entrees["Client"].set(clients[0])
-    # ==========================================
-    # Vérification de la base de données
-    # ==========================================
+            texte = f"{nom} {prenom}"
 
-    def verifier_base():
-        conn = sqlite3.connect("fms_manager.db")
-        cur = conn.cursor()
+            self.clients[texte] = id_client
 
-        conn.commit()
-        conn.close()
-           
-    # ==========================================
-    # Chargement des véhicules
-    # ==========================================
+            liste.append(texte)
 
-    def charger_vehicules():
+        self.client_combo.configure(values=liste)
 
-        for item in liste.get_children():
-            liste.delete(item)
+        if self.id_client:
+            for nom_client, id_c in self.clients.items():
+                if id_c == self.id_client:
+                 self.client_combo.set(nom_client)
+                 break
+        elif liste:
+            self.client_combo.set(liste[0])
 
-        conn = sqlite3.connect("fms_manager.db")
-        cur = conn.cursor()
 
-        cur.execute("""
-            SELECT
-                vehicules.id,
-                clients.nom,
-                vehicules.immatriculation,
-                vehicules.marque,
-                vehicules.modele,
-                vehicules.version
-            FROM vehicules
-            LEFT JOIN clients
-                ON clients.id = vehicules.client_id
-            ORDER BY clients.nom, vehicules.marque
-        """)
+    # ==========================
+    # NOUVEAU VEHICULE
+    # ==========================
+    def nouveau_vehicule(self):
+        for entree in self.entrees.values():
+            entree.delete(0, "end")
 
-        vehicules = cur.fetchall()
+        if self.liste.selection():
+            self.liste.selection_remove(self.liste.selection())
 
-        conn.close()
+    # ==========================
+    # ENREGISTRER VEHICULE
+    # ==========================
+    def enregistrer_vehicule(self):
 
-        for ligne in vehicules:
+        client = self.client_combo.get()
+        client_id = self.clients.get(client)
 
-            liste.insert(
+        if client_id is None:
+            messagebox.showwarning(
+                "Attention",
+                "Sélectionnez un client."
+            )
+            return
+
+        immatriculation = self.entrees["Immatriculation"].get().strip()
+
+        if not immatriculation:
+            messagebox.showwarning(
+                "Attention",
+                "L'immatriculation est obligatoire."
+    )
+            return
+
+
+        self.cur.execute("""
+            INSERT INTO vehicules(
+                client_id,
+                immatriculation,
+                marque,
+                modele,
+                motorisation,
+                carburant,
+                annee,
+                kilometrage,
+                vin,
+                observations
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?)
+        """, (
+            client_id,
+            self.entrees["Immatriculation"].get(),
+            self.entrees["Marque"].get(),
+            self.entrees["Modèle"].get(),
+            self.entrees["Motorisation"].get(),
+            self.entrees["Carburant"].get(),
+            self.entrees["Année"].get(),
+            self.entrees["Kilométrage"].get(),
+            self.entrees["vin"].get(),
+            self.observations.get("1.0", "end").strip()
+        ))
+
+        self.conn.commit()
+
+        self.nouveau_vehicule()
+        self.charger_vehicules()
+
+        messagebox.showinfo(
+            "FMS Manager",
+            "Vehicule enregistré avec succès."
+        )
+
+    # ==========================
+    # CHARGER LES VEHICULES
+    # ==========================
+    def charger_vehicules(self):
+
+        for item in self.liste.get_children():
+            self.liste.delete(item)
+
+        if self.id_client:
+
+            self.cur.execute("""
+                SELECT
+                    id,
+                    immatriculation,
+                    marque,
+                    modele
+                FROM vehicules
+                WHERE client_id=?
+                ORDER BY immatriculation
+            """, (self.id_client,))
+
+        else:
+
+            self.cur.execute("""
+                SELECT
+                    id,
+                    immatriculation,
+                    marque,
+                    modele
+                FROM vehicules
+                ORDER BY immatriculation
+            """)
+
+
+        for id_vehicule, immatriculation, marque, modele in self.cur.fetchall():
+
+            self.liste.insert(
                 "",
                 "end",
-                iid=ligne[0],
+                iid=str(id_vehicule),
                 values=(
-                    ligne[1],
-                    ligne[2],
-                    ligne[3],
-                    ligne[4],
-                    ligne[5]
+                    immatriculation,
+                    f"{marque} {modele}"
                 )
             )
- # ==========================================
-    # Véhicule sélectionné
-    # ==========================================
-    
-    vehicule_selectionne = None
-    
-    # ==========================================
-    # Sélection d'un véhicule
-    # ==========================================
 
-    def selectionner_vehicule(event):
+    # ==========================
+    # SÉLECTION VEHICULE
+    # ==========================
+    def selection_vehicule(self, event=None):
 
-        nonlocal vehicule_selectionne
-
-        selection = liste.selection()
+        selection = self.liste.selection()
 
         if not selection:
             return
 
-        vehicule_selectionne = int(selection[0])
+        id_vehicule = selection[0]
 
-        conn = sqlite3.connect("fms_manager.db")
-        cur = conn.cursor()
-
-        cur.execute("""
+        self.cur.execute("""
             SELECT
-                clients.nom,
-                vehicules.immatriculation,
-                vehicules.marque,
-                vehicules.modele,
-                vehicules.version,
-                vehicules.motorisation,
-                vehicules.carburant,
-                vehicules.boite,
-                vehicules.annee,
-                vehicules.kilometrage,
-                vehicules.vin,
-                vehicules.couleur
+                client_id,
+                immatriculation,
+                marque,
+                modele,
+                motorisation,
+                carburant,
+                annee,
+                kilometrage,
+                vin,
+                observations
             FROM vehicules
-            LEFT JOIN clients
-                ON clients.id = vehicules.client_id
-            WHERE vehicules.id = ?
-        """, (vehicule_selectionne,))
+            WHERE id=?
+        """, (id_vehicule,))
 
-        ligne = cur.fetchone()
+        vehicule = self.cur.fetchone()
 
-        conn.close()
-
-        if ligne is None:
+        if vehicule is None:
             return
 
-        entrees["Client"].set("" if ligne[0] is None else ligne[0])
-
-        noms = [
+        champs = [
             "Immatriculation",
             "Marque",
             "Modèle",
-            "Version",
             "Motorisation",
             "Carburant",
-            "Boîte",
             "Année",
             "Kilométrage",
-            "VIN",
-            "Couleur"
+            "vin"
         ]
 
-        for i, nom in enumerate(noms, start=1):
-            entrees[nom].delete(0, "end")
-            entrees[nom].insert(0, "" if ligne[i] is None else ligne[i])
+        for i, champ in enumerate(champs, start=1):
+            self.entrees[champ].delete(0, "end")
+            self.entrees[champ].insert(0, vehicule[i] if vehicule[i] else "")
 
-    def supprimer():
-        nonlocal vehicule_selectionne
+        client_id=vehicule[0]
+        for nom_client, id_c in self.clients.items():
+         if id_c == client_id:
+            self.client_combo.set(nom_client)
+            break
 
-        if vehicule_selectionne is None:
+        self.observations.delete("1.0", "end")
+        self.observations.insert("1.0", vehicule[8] if vehicule[8] else "")
+
+    # ==========================
+    # MODIFIER VEHICULE
+    # ==========================
+    def modifier_vehicule(self):
+
+        selection = self.liste.selection()
+
+        if not selection:
             messagebox.showwarning(
-                "FMS Manager",
-                "Veuillez sélectionner un véhicule."
+                "Attention",
+                "Sélectionnez un vehicule."
+            )
+            return
+
+        id_vehicule = selection[0]
+
+        self.cur.execute("""
+            UPDATE vehicules
+            SET
+                immatriculation=?,
+                marque=?,
+                modele=?,
+                motorisation=?,
+                carburant=?,
+                annee=?,
+                kilometrage=?,
+                vin=?,
+                observations=?
+            WHERE id=?
+        """, (
+            self.entrees["Immatriculation"].get(),
+            self.entrees["Marque"].get(),
+            self.entrees["Modèle"].get(),
+            self.entrees["Motorisation"].get(),
+            self.entrees["Carburant"].get(),
+            self.entrees["Année"].get(),
+            self.entrees["Kilométrage"].get(),
+            self.entrees["vin"].get(),
+            self.observations.get("1.0", "end").strip(),
+            id_vehicule
+        ))
+
+        self.conn.commit()
+
+        self.charger_vehicules()
+
+        messagebox.showinfo(
+            "FMS Manager",
+            "Vehicule modifié avec succès."
+        )
+    # ==========================
+    # SUPPRIMER VEHICULE
+    # ==========================
+    def supprimer_vehicule(self):
+
+        selection = self.liste.selection()
+
+        if not selection:
+            messagebox.showwarning(
+                "Attention",
+                "Sélectionnez un vehicule."
             )
             return
 
         if not messagebox.askyesno(
             "Confirmation",
-            "Voulez-vous vraiment supprimer ce véhicule ?"
+            "Supprimer ce vehicule ?"
         ):
             return
 
-        conn = sqlite3.connect("fms_manager.db")
-        cur = conn.cursor()
+        id_vehicule = selection[0]
 
-        cur.execute(
+        self.cur.execute(
             "DELETE FROM vehicules WHERE id=?",
-            (vehicule_selectionne,)
+            (id_vehicule,)
         )
 
-        conn.commit()
-        conn.close()
+        self.conn.commit()
 
-        vehicule_selectionne = None
-
-        charger_vehicules()
+        self.nouveau_vehicule()
+        self.charger_vehicules()
 
         messagebox.showinfo(
             "FMS Manager",
-            "Véhicule supprimé avec succès."
+            "Vehicule supprimé."
         )
 
-    # ==========================================
-    # Enregistrer un véhicule
-    # ==========================================
+    # ==========================
+    # RECHERCHER VEHICULE
+    # ==========================
+    def rechercher_vehicule(self, event=None):
 
-    def enregistrer():
+        texte = self.recherche.get().strip()
 
-     client = entrees["Client"].get().strip()
-     nonlocal vehicule_selectionne
+        for item in self.liste.get_children():
+            self.liste.delete(item)
 
-     if client == "":
-        messagebox.showwarning(
-            "FMS Manager",
-            "Veuillez sélectionner un client."
-        )
-        return
-
-     conn = sqlite3.connect("fms_manager.db")
-     cur = conn.cursor()
-
-     cur.execute(
-        "SELECT id FROM clients WHERE nom=?",
-        (client,)
-     )
-
-     resultat = cur.fetchone()
-
-     if resultat is None:
-        conn.close()
-        messagebox.showerror(
-            "Erreur",
-            "Client introuvable."
-        )
-        return
-
-     client_id = resultat[0]
-
-     # Vérifie si l'immatriculation existe déjà
-     cur.execute(
-        "SELECT id FROM vehicules WHERE immatriculation=?",
-        (
-            entrees["Immatriculation"].get().strip(),
-        )
-     )
-     doublon=cur.fetchone()
-     if doublon:
-      if vehicule_selectionne is None or doublon[0]!=vehicule_selectionne:
-        conn.close()
-        messagebox.showwarning(
-            "FMS Manager",
-            "Cette immatriculation existe déjà."
-        )
-        return
-     if vehicule_selectionne is not None:
-
-         cur.execute("""
-            UPDATE vehicules
-            SET
-                client_id=?,
-                immatriculation=?,
-                marque=?,
-                modele=?,
-                version=?,
-                motorisation=?,
-                carburant=?,
-                boite=?,
-                annee=?,
-                kilometrage=?,
-                vin=?,
-                couleur=?
-            WHERE id=?
+        self.cur.execute("""
+            SELECT
+                id,
+                immatriculation,
+                marque,
+                modele
+            FROM vehicules
+            WHERE
+                immatriculation LIKE ?
+                OR marque LIKE ?
+                OR modele LIKE ?
+            ORDER BY immatriculation
         """, (
-
-            client_id,
-            entrees["Immatriculation"].get().strip(),
-            entrees["Marque"].get().strip(),
-            entrees["Modèle"].get().strip(),
-            entrees["Version"].get().strip(),
-            entrees["Motorisation"].get().strip(),
-            entrees["Carburant"].get().strip(),
-            entrees["Boîte"].get().strip(),
-            entrees["Année"].get().strip(),
-            entrees["Kilométrage"].get().strip(),
-            entrees["VIN"].get().strip(),
-            entrees["Couleur"].get().strip(),
-            vehicule_selectionne
-
+            f"%{texte}%",
+            f"%{texte}%",
+            f"%{texte}%"
         ))
 
-     else:
+        for id_vehicule, immatriculation, marque, modele in self.cur.fetchall():
 
-          cur.execute("""
-            INSERT INTO vehicules(
-            client_id,
-            immatriculation,
-            marque,
-            modele,
-            version,
-            motorisation,
-            carburant,
-            boite,
-            annee,
-            kilometrage,
-            vin,
-            couleur
+            self.liste.insert(
+                "",
+                "end",
+                iid=str(id_vehicule),
+                values=(
+                    immatriculation,
+                    f"{marque} {modele}"
+                )
             )
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            client_id,
-            entrees["Immatriculation"].get().strip(),
-            entrees["Marque"].get().strip(),
-            entrees["Modèle"].get().strip(),
-            entrees["Version"].get().strip(),
-            entrees["Motorisation"].get().strip(),
-            entrees["Carburant"].get().strip(),
-            entrees["Boîte"].get().strip(),
-            entrees["Année"].get().strip(),
-            entrees["Kilométrage"].get().strip(),
-            entrees["VIN"].get().strip(),
-            entrees["Couleur"].get().strip(),
-     ))
-
-     conn.commit()
-     conn.close()
-
-     messagebox.showinfo(
-        "FMS Manager",
-        "Véhicule enregistré avec succès."
-     )
-
-     for champ, widget in entrees.items():
-        if champ == "Client":
-            continue
-        widget.delete(0, "end")
-
-     observations.delete("1.0", "end")
-
-     charger_vehicules()
-    
-    # ==========================================
-    # Initialisation
-    # ==========================================
-    bouton_enregistrer.configure(command=enregistrer)
-    bouton_supprimer.configure(command=supprimer)
-    liste.bind("<<TreeviewSelect>>",selectionner_vehicule)
-    verifier_base()
-    charger_clients()
-    charger_vehicules()

@@ -384,7 +384,8 @@ class ClientManager:
             width=130,
             height=40,
             corner_radius=10,
-            text_color="white"
+            text_color="white",
+            command=self.voir_vehicules
         )
         self.btn_vehicules.pack(side="left", padx=5)
 
@@ -397,7 +398,8 @@ class ClientManager:
             width=130,
             height=40,
             corner_radius=10,
-            text_color="white"
+            text_color="white",
+            command=self.voir_vehicules
         )
         self.btn_devis.pack(side="left", padx=5)
 
@@ -603,6 +605,23 @@ class ClientManager:
         self.observations.delete("1.0", "end")
         self.observations.insert("1.0", client[10] if client[10] else "")
 
+    def voir_vehicules(self):
+
+        selection = self.liste.selection()
+
+        if not selection:
+            messagebox.showwarning(
+                "Attention",
+                "Sélectionnez un client."
+            )
+            return
+
+        id_client = selection[0]
+
+        from modules.vehicules import VehiculeManager
+
+        VehiculeManager(self.parent, id_client=id_client)
+  
 
     # ==========================
     # MODIFIER CLIENT

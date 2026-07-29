@@ -47,6 +47,9 @@ def creer_base():
         kilometrage INTEGER,
         vin TEXT,
         couleur TEXT,
+        mise_en_circulation TEXT,
+        controle_technique TEXT,
+        observations TEXT,
         FOREIGN KEY(client_id) REFERENCES clients(id)
     )
     """)
@@ -60,7 +63,7 @@ def creer_base():
      montant_ht REAL,
      tva REAL,
      montant_ttc REAL,
-     travaux TEXT
+     travaux TEXT,
      statut TEXT DEFAULT 'En attente'
      )
      """)
@@ -135,9 +138,140 @@ def creer_base():
          )
          """)
 
+    # ==========================================
+    # TABLE PRESTATIONS
+    # ==========================================
+    
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS prestations(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reference TEXT UNIQUE,
+        designation TEXT NOT NULL,
+        categorie TEXT,
+        type_tarification TEXT,
+        unite TEXT,
+        quantite REAL,
+        prix_ht REAL,
+        tva REAL,
+        prix_ttc REAL
+    )
+    """)
+
+    cur.execute("PRAGMA table_info(prestations)")
+    print("Colonnes prestations :",cur.fetchall())
+
 
     conn.commit()
     conn.close()
 
 
 creer_base()
+
+def supprimer_prestation(reference):
+
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+
+    cur.execute(
+        "DELETE FROM prestations WHERE reference=?",
+        (reference,)
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def modifier_prestation(reference,
+                        designation,
+                        categorie,
+                        type_tarification,
+                        unite,
+                        quantite,
+                        prix_ht,
+                        tva,
+                        prix_ttc):
+
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE prestations
+        SET
+            designation=?,
+            categorie=?,
+            type_tarification=?,
+            unite=?,
+            quantite=?,
+            prix_ht=?,
+            tva=?,
+            prix_ttc=?
+        WHERE reference=?
+    """, (
+        designation,
+        categorie,
+        type_tarification,
+        unite,
+        quantite,
+        prix_ht,
+        tva,
+        prix_ttc,
+        reference
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+def recuperer_prestation(reference):
+
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT reference,
+               designation,
+               categorie,
+               type_tarification,
+               unite,
+               quantite,
+               prix_ht,
+               tva,
+               prix_ttc
+        FROM prestations
+        WHERE reference=?
+    """, (reference,))
+
+    prestation = cur.fetchone()
+
+    conn.close()
+
+    return prestation
+
+
+def ajouter_prestation(reference, designation, categorie, type_tarification,
+                       unite, quantite, prix_ht,
+                       tva, prix_ttc):
+
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO prestations
+        (reference, designation, categorie, type_tarification,
+         unite, quantite, prix_ht,
+         tva, prix_ttc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        reference,
+        designation,
+        categorie,
+        type_tarification,
+        unite,
+        quantite,
+        prix_ht,
+        tva,
+        prix_ttc
+    ))
+
+    conn.commit()
+    conn.close()
