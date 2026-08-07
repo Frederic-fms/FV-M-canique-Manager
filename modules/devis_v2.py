@@ -1,12 +1,21 @@
 import customtkinter as ctk
 import sqlite3
-from tkinter import messagebox
-from datetime import datetime
-from tkinter import ttk
-from modules import pdf_manager
-from modules import reparations
 import os
+import smtplib
+import ssl
 import win32api
+
+from tkinter import ttk, messagebox
+from datetime import datetime, timedelta
+from email.message import EmailMessage
+from PIL import Image
+
+import database
+
+from modules.selection_client import SelectionClient
+from modules.selection_vehicule import SelectionVehicule
+from modules.catalogue_prestations import CataloguePrestations
+from modules import pdf_manager
 
 
 class DevisManager:
@@ -15,604 +24,2342 @@ class DevisManager:
 
         self.parent = parent
 
+        # Base de données
         self.conn = sqlite3.connect("fms_manager.db")
         self.cur = self.conn.cursor()
+
+        # Vérification des tables
         self.verifier_base()
 
-        self.lignes=[]
-        self.devis_selectionne=None
-        self.creer_fenetre()
-        
-    def verifier_base(self):
+        # Variables
+        self.devis_id = None
+        self.client_id = None
 
-     self.cur.execute("""
-        CREATE TABLE IF NOT EXISTS devis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            numero TEXT,
-            date TEXT,
-            client TEXT,
-            immatriculation TEXT,
-            montant_ht REAL,
-            tva REAL,
-            montant_ttc REAL
-        )
-     """)
+        # Fenêtre
+        self.fenetre = ctk.CTkToplevel(parent)
+        self.fenetre.title("FMS Manager - Devis")
+        self.fenetre.geometry("1600x900")
+        self.fenetre.minsize(1400, 900)
+        self.fenetre.configure(fg_color="#464242")
 
-     self.cur.execute("""
-        CREATE TABLE IF NOT EXISTS lignes_devis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            devis_id INTEGER,
-            reference TEXT,
-            designation TEXT,
-            quantite REAL,
-            prix_ht REAL,
-            tva REAL,
-            total REAL
-        )
-     """)
-
-     self.conn.commit()
-
-    def generer_numero_devis(self):
-
-     annee = datetime.now().year
-
-     self.cur.execute("""
-        SELECT numero
-        FROM devis
-        WHERE numero LIKE ?
-        ORDER BY id DESC
-        LIMIT 1
-     """, (f"DV-{annee}-%",))
-
-     resultat = self.cur.fetchone()
-
-     if resultat:
-        dernier = int(resultat[0].split("-")[-1]) + 1
-     else:
-        dernier = 1
-
-     return f"DV-{annee}-{dernier:04d}"
-
-
-    def creer_fenetre(self):
-
-        self.fenetre = ctk.CTkToplevel(self.parent)
-        self.fenetre.title("FMS Manager V2 - Gestion des devis")
-        self.fenetre.geometry("1500x900")
         self.fenetre.grab_set()
+        self.fenetre.focus_force()
 
-        titre = ctk.CTkLabel(
+        # Création interface
+        self.creer_interface()
+
+        # Initialisation
+        self.nouveau_devis()
+        self.charger_liste_devis()
+        self.temps_unitaires = {}
+
+    def creer_interface(self):
+
+        # =====================================================
+        # EN-TÊTE
+        # =====================================================
+
+        header = ctk.CTkFrame(
             self.fenetre,
-            text="Gestion des devis",
-            font=("Arial", 28, "bold")
+            height=80,
+            fg_color="#0A0606",
+            corner_radius=0
         )
-        titre.pack(pady=15)
+        header.pack(fill="x")
+        header.pack_propagate(False)
 
-        self.principal = ctk.CTkFrame(self.fenetre)
-        self.principal.pack(
+        try:
+            self.logo = ctk.CTkImage(
+                light_image=Image.open("assets/logo_fms.png"),
+                dark_image=Image.open("assets/logo_fms.png"),
+                size=(150, 125)
+            )
+
+            ctk.CTkLabel(
+                header,
+                image=self.logo,
+                text=""
+            ).pack(side="left", padx=(20, 10))
+
+        except Exception:
+            pass
+
+        titre = ctk.CTkFrame(
+            header,
+            fg_color="transparent"
+        )
+        titre.pack(side="left")
+
+        ctk.CTkLabel(
+            titre,
+            text="FMS Manager",
+            font=("Arial", 24, "bold")
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            titre,
+            text="Gestion des devis",
+            text_color="#D80606",
+            font=("Arial", 15)
+        ).pack(anchor="w")
+
+        # =====================================================
+        # CONTENU
+        # =====================================================
+
+        contenu = ctk.CTkFrame(
+            self.fenetre,
+            fg_color="transparent"
+        )
+
+        contenu.pack(
             fill="both",
             expand=True,
             padx=15,
             pady=15
         )
 
-        self.gauche = ctk.CTkScrollableFrame(
-            self.principal,
-            width=620
+        # =====================================================
+        # COLONNE GAUCHE
+        # =====================================================
+
+        self.gauche = ctk.CTkFrame(
+            contenu,
+            width=420,
+            fg_color="#0A0606",
+            corner_radius=12
         )
+
         self.gauche.pack(
             side="left",
             fill="both",
-            expand=False,
             padx=(0, 10)
         )
-        
-        self.droite = ctk.CTkFrame(self.principal)
+
+        self.gauche.grid_rowconfigure(1, weight=1)
+        self.gauche.grid_columnconfigure(0, weight=1)
+
+        # =====================================================
+        # RECHERCHE
+        # =====================================================
+
+        frame_recherche = ctk.CTkFrame(
+            self.gauche,
+            fg_color="#0A0606",
+            height=90
+        )
+
+        frame_recherche.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=15,
+            pady=(15, 10)
+        )
+
+        ctk.CTkLabel(
+            frame_recherche,
+            text="🔍 Recherche",
+            font=("Arial", 18, "bold")
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
+        self.entry_recherche = ctk.CTkEntry(
+            frame_recherche,
+            placeholder_text="Nom du client ou N° devis..."
+        )
+
+        self.entry_recherche.pack(
+            fill="x",
+            padx=10,
+            pady=(0, 10)
+        )
+        self.entry_recherche.bind(
+           "<KeyRelease>",
+            self.rechercher_devis
+        )
+
+        # =====================================================
+        # LISTE DES DEVIS
+        # =====================================================
+
+        frame_liste = ctk.CTkFrame(
+            self.gauche,
+            fg_color="#0A0606"
+        )
+
+        frame_liste.grid(
+            row=1,
+            column=0,
+            sticky="nsew",
+            padx=15
+        )
+
+        style = ttk.Style()
+        style.theme_use("default")
+
+        style.configure(
+            "Treeview",
+            background="white",
+            foreground="black",
+            fieldbackground="white",
+            rowheight=28
+        )
+
+        self.table_devis = ttk.Treeview(
+            frame_liste,
+            columns=("numero", "client", "date"),
+            show="headings"
+        )
+
+        self.table_devis.heading("numero", text="Devis")
+        self.table_devis.heading("client", text="Client")
+        self.table_devis.heading("date", text="Date")
+
+        self.table_devis.column(
+            "numero",
+            width=100,
+            anchor="center"
+        )
+
+        self.table_devis.column(
+            "client",
+            width=180
+        )
+
+        self.table_devis.column(
+            "date",
+            width=90,
+            anchor="center"
+        )
+
+        self.table_devis.bind(
+            "<<TreeviewSelect>>",
+            self.ouvrir_devis
+        )
+        self.table_devis.bind(
+           "<Double-1>",
+            self.ouvrir_devis
+        )
+
+        scroll = ttk.Scrollbar(
+            frame_liste,
+            orient="vertical",
+            command=self.table_devis.yview
+        )
+
+        self.table_devis.configure(
+            yscrollcommand=scroll.set
+        )
+
+        self.table_devis.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        scroll.pack(
+            side="right",
+            fill="y"
+        )
+
+        # =====================================================
+        # BOUTONS
+        # =====================================================
+
+        frame_boutons = ctk.CTkFrame(
+            self.gauche,
+            fg_color="#0A0606",
+            height=260
+        )
+
+        frame_boutons.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            padx=15,
+            pady=15
+        )
+
+        boutons = [
+
+            ("➕ Nouveau", self.nouveau_devis),
+
+            ("💾 Enregistrer", self.enregistrer_devis),
+
+            ("🔄 Transformer en OR", self.transformer_en_or),
+
+            ("🖨 Exporter / Envoyer", self.menu_export),
+
+            ("🗑 Supprimer", self.supprimer_devis),
+
+            ("🔄 Actualiser", self.charger_liste_devis)
+
+        ]
+
+        for texte, commande in boutons:
+
+            ctk.CTkButton(
+                frame_boutons,
+                text=texte,
+                height=30,
+                fg_color="#FC0411",
+                hover_color="#BB0214",
+                command=commande
+            ).pack(
+                fill="x",
+                pady=4
+            )
+
+        # =====================================================
+        # COLONNE DROITE
+        # =====================================================
+
+        self.droite = ctk.CTkFrame(
+            contenu,
+            fg_color="#464242",
+            corner_radius=12
+        )
 
         self.droite.pack(
             side="right",
             fill="both",
             expand=True,
-            padx=10
-        )
-        self.creer_liste_devis()
-        self.creer_formulaire()
-
-    def creer_liste_devis(self):
-
-     from tkinter import ttk
-
-     colonnes = (
-        "numero",
-        "date",
-        "client",
-        "immatriculation",
-        "ttc"
-     )
-
-     self.table = ttk.Treeview(
-        self.droite,
-        columns=colonnes,
-        show="headings",
-        height=25
-     )
-
-     self.table.heading("numero", text="N°")
-     self.table.heading("date", text="Date")
-     self.table.heading("client", text="Client")
-     self.table.heading("immatriculation", text="Immatriculation")
-     self.table.heading("ttc", text="TTC")
-
-     self.table.column("numero", width=130)
-     self.table.column("date", width=90)
-     self.table.column("client", width=220)
-     self.table.column("immatriculation", width=120)
-     self.table.column("ttc", width=90)
-
-     self.table.pack(fill="x", expand=False, padx=10, pady=10)
-     self.table.bind("<<TreeviewSelect>>",
-     self.selectionner_devis)
-
-     self.charger_devis()
-
-    def charger_devis(self):
-
-     for item in self.table.get_children():
-        self.table.delete(item)
-
-     self.cur.execute("""
-        SELECT
-            id,
-            numero,
-            date,
-            client,
-            immatriculation,
-            montant_ttc
-         FROM devis
-         ORDER BY id DESC
-         """)
-     resultats=self.cur.fetchall()
-     print(resultats)
-     for devis in resultats:
-        self.table.insert(
-            "",
-            "end",
-            iid=devis[0],
-            values=devis[1:]
+            padx=(10, 0)
         )
 
-    def creer_formulaire(self):
+         # =====================================================
+        # INFORMATIONS DU DEVIS
+        # =====================================================
 
-     champs = [
-        "Numéro devis",
-        "Date",
-        "Client",
-        "Immatriculation",
-        "Montant HT",
-        "TVA",
-        "Montant TTC"
-    ]
+        frame_infos = ctk.CTkFrame(
+            self.droite,
+            height=160,
+            fg_color="#0A0606",
+            corner_radius=10
+        )
 
-     self.entrees = {}
+        frame_infos.pack(
+            fill="x",
+            padx=20,
+            pady=(10, 5)
+        )
 
-     for champ in champs:
+        frame_infos.pack_propagate(False)
 
         ctk.CTkLabel(
-            self.gauche,
-            text=champ,
-            font=("Arial", 14, "bold")
-        ).pack(anchor="w", padx=10, pady=(10, 2))
-
-        if champ == "Client":
-         self.cur.execute("SELECT nom FROM clients ORDER BY nom")
-         clients = [c[0] for c in self.cur.fetchall()]
-         print(clients)
-
-         entree = ctk.CTkComboBox(
-           self.gauche,
-           values=clients,
-           width=420,
-           command=self.client_selectionne)
-
-        elif champ == "Immatriculation":
-          entree = ctk.CTkEntry(
-          self.gauche,
-          width=420
-         )
-
-        else:
-          entree = ctk.CTkEntry(
-          self.gauche,
-          width=420
-         )
-
-
-        entree.pack(padx=10, pady=(0, 8))
-
-        self.entrees[champ] = entree
-
-     self.entrees["Date"].insert(
-        0,
-        datetime.now().strftime("%d/%m/%Y")
-    )
-     self.entrees["Numéro devis"].insert(0,
-     self.generer_numero_devis())
-     self.entrees["Numéro devis"].configure(state="readonly")
-     self.entrees["Montant HT"].configure(state="readonly")
-     self.entrees["TVA"].configure(state="readonly")
-     self.entrees["Montant TTC"].configure(state="readonly")
-
-     ctk.CTkLabel(
-        self.gauche,
-        text="Prestations",  
-        font=("Arial",16,"bold")
-    ).pack(anchor="w",padx=10,pady=(20,10))  
-
-     entete=ctk.CTkFrame(self.gauche,
-            fg_color="transparent")
-     entete.pack(fill="x",padx=10)
-
-     self.table_prestations = ttk.Treeview(
-     self.gauche,
-     columns=("ref", "designation", "qte", "pu", "tva", "total"),
-     show="headings",
-     height=15
-     )
-
-     self.table_prestations.heading("ref", text="Référence")
-     self.table_prestations.heading("designation", text="Désignation")
-     self.table_prestations.heading("qte", text="Qté")
-     self.table_prestations.heading("pu", text="PU HT")
-     self.table_prestations.heading("tva", text="TVA")
-     self.table_prestations.heading("total", text="Total")
-
-     self.table_prestations.column("ref", width=90)
-     self.table_prestations.column("designation", width=180)
-     self.table_prestations.column("qte", width=50)
-     self.table_prestations.column("pu", width=70)
-     self.table_prestations.column("tva", width=60)
-     self.table_prestations.column("total", width=80)
-
-     self.table_prestations.pack(fill="both", expand=True,
-                                  padx=10, pady=5)
-     self.bouton_ajouter = ctk.CTkButton(
-     self.gauche,
-     text="+ Ajouter une ligne",
-     command=self.ajouter_ligne,
-     fg_color="#1f6aa5"
-     )
-     self.bouton_ajouter.pack(anchor="w", padx=10, pady=5)
-
-
-
-     self.frame_lignes = ctk.CTkFrame(self.gauche, fg_color="transparent")
-     self.frame_lignes.pack(fill="both", expand=True,
-                             padx=10, pady=(10,5))
-
-     self.ent_ref = ctk.CTkEntry(self.frame_lignes, width=120)
-     self.ent_ref.pack(side="left", padx=2)
-
-     self.ent_designation = ctk.CTkEntry(self.frame_lignes, width=260)
-     self.ent_designation.pack(side="left", padx=2)
-
-     self.ent_qte = ctk.CTkEntry(self.frame_lignes, width=60)
-     self.ent_qte.pack(side="left", padx=2)
-
-     self.ent_pu = ctk.CTkEntry(self.frame_lignes, width=80)
-     self.ent_pu.pack(side="left", padx=2)
-
-     self.ent_tva = ctk.CTkEntry(self.frame_lignes, width=60)
-     self.ent_tva.pack(side="left", padx=2)
-
-     self.ent_total = ctk.CTkEntry(self.frame_lignes, width=90)
-     self.ent_total.pack(side="left", padx=2)
-
-     self.ent_qte.bind("<KeyRelease>",lambda e:
-     self.calculer_totaux())
-     self.ent_pu.bind("<KeyRelease>",lambda e:
-     self.calculer_totaux())
-     self.ent_tva.bind("<KeyRelease>",lambda e:
-     self.calculer_totaux())
-
-     self.table_prestations.bind("<Double-1>",
-     self.modifier_ligne)
-     self.table_prestations.insert(
-        "",
-        "end",
-        values=("", "", "", "",
-                "", "",)
-     )
-     
-     frame_boutons = ctk.CTkFrame(self.gauche, fg_color="transparent")
-     frame_boutons.pack(pady=15)
-
-     frame_boutons1=ctk.CTkFrame(frame_boutons,
-                  fg_color="transparent")
-     frame_boutons1.pack(pady=(0,5))
-
-     frame_boutons2=ctk.CTkFrame(frame_boutons,
-                  fg_color="transparent")
-     frame_boutons2.pack()
-
-     ctk.CTkButton(
-      frame_boutons1,
-        text="💾 Enregistrer",
-        width=90,
-        fg_color="green",
-        command=self.enregistrer_devis
-     ).grid(row=0, column=0, padx=5)
-
-     ctk.CTkButton(
-        frame_boutons1,
-        text="✏️ Modifier",
-        width=90,
-        fg_color="#f39c12",
-        command=self.modifier_devis
-     ).grid(row=0, column=1, padx=5)
-
-     ctk.CTkButton(
-        frame_boutons1,
-        text="🗑️ Supprimer",
-        width=90,
-        fg_color="#d63031",
-        command=self.supprimer_devis
-     ).grid(row=0, column=2, padx=5)
-
-     ctk.CTkButton(
-        frame_boutons1,
-        text="🖨️ Imprimer",
-        width=90,
-        command=self.imprimer_devis
-     ).grid(row=0, column=3, padx=5)
-
-     ctk.CTkButton(
-        frame_boutons2,
-        text="📄 PDF",
-        width=90,
-        command=self.exporter_pdf
-     ).grid(row=0, column=4, padx=5)
-
-     ctk.CTkButton(
-        frame_boutons2,
-        text="👁️ Aperçu",
-        command=self.apercu_devis
-     ).grid(row=0, column=5, padx=5)
-
-     ctk.CTkButton(
-        frame_boutons2,
-        text="📧 E-mail",
-        width=90,
-        command=self.envoyer_email
-     ).grid(row=0, column=6, padx=5)
-
-     ctk.CTkButton(
-        frame_boutons2,
-        text="🔧 Créer OR",
-        command=self.creer_ordre_reparation
-     ).grid(row=0, column=7, padx=5)
-
-     
-
-
-     
-    def ajouter_ligne(self):
-
-        self.table_prestations.insert(
-            "",
-            "end",
-            values=(
-                self.ent_ref.get(),
-                self.ent_designation.get(),
-                self.ent_qte.get(),
-                self.ent_pu.get(),
-                self.ent_tva.get(),
-                self.ent_total.get()
-            )
+            frame_infos,
+            text="📄 Informations du devis",
+            font=("Arial", 12, "bold")
+        ).grid(
+            row=0,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            padx=10,
+            pady=(6, 5)
         )
 
-        self.ent_ref.delete(0, "end")
-        self.ent_designation.delete(0, "end")
-        self.ent_qte.delete(0, "end")
-        self.ent_pu.delete(0, "end")
-        self.ent_tva.delete(0, "end")
-        self.ent_total.delete(0, "end")
-        self.calculer_total_devis()
+        for i in range(3):
+            frame_infos.grid_columnconfigure(i, weight=1)
 
-    def modifier_ligne(self, event):
-        item = self.table_prestations.focus()
+        # ===========================
+        # Ligne 1
+        # ===========================
 
-        if not item:
-            return
+        ctk.CTkLabel(
+            frame_infos,
+            text="N° devis"
+        ).grid(row=1, column=0, sticky="w", padx=8)
 
-        valeurs = self.table_prestations.item(item, "values")
+        ctk.CTkLabel(
+            frame_infos,
+            text="Date"
+        ).grid(row=1, column=2, sticky="w", padx=8)
 
-        self.ent_ref.delete(0, "end")
-        self.ent_designation.delete(0, "end")
-        self.ent_qte.delete(0, "end")
-        self.ent_pu.delete(0, "end")
-        self.ent_tva.delete(0, "end")
-        self.ent_total.delete(0, "end")
+        self.entry_numero = ctk.CTkEntry(
+            frame_infos,
+            height=26
+        )
 
-        self.ent_ref.insert(0, valeurs[0])
-        self.ent_designation.insert(0, valeurs[1])
-        self.ent_qte.insert(0, valeurs[2])
-        self.ent_pu.insert(0, valeurs[3])
-        self.ent_tva.insert(0, valeurs[4])
-        self.ent_total.insert(0, valeurs[5])
+        self.entry_date = ctk.CTkEntry(
+            frame_infos,
+            height=26
+        )
 
-        self.table_prestations.delete(item)
+        self.entry_numero.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            padx=(8, 5),
+            pady=(0, 4)
+        )
 
-    def calculer_totaux(self):
-        try:
-            qte = float(self.ent_qte.get())
-            pu = float(self.ent_pu.get())
-            tva = float(self.ent_tva.get())
+        self.entry_date.grid(
+            row=2,
+            column=2,
+            sticky="ew",
+            padx=(5, 8),
+            pady=(0, 4)
+        )
 
-            total = qte * pu * (1 + tva / 100)
+        # ===========================
+        # Ligne 2
+        # ===========================
 
-            self.ent_total.configure(state="normal")
-            self.ent_total.delete(0, "end")
-            self.ent_total.insert(0, f"{total:.2f}")
-            self.ent_total.configure(state="readonly")
+        ctk.CTkLabel(
+            frame_infos,
+            text="Client"
+        ).grid(
+            row=3,
+            column=0,
+            sticky="w",
+            padx=8
+        )
 
-        except ValueError:
-            self.ent_total.configure(state="normal")
-            self.ent_total.delete(0, "end")
-            self.ent_total.configure(state="readonly")
+        ctk.CTkLabel(
+            frame_infos,
+            text="Échéance"
+        ).grid(
+            row=3,
+            column=2,
+            sticky="w",
+            padx=8
+        )
 
-    def calculer_total_devis(self):
-        montant_ht = 0
-        tva = 0
-        montant_ttc = 0
+        self.entry_client = ctk.CTkEntry(
+            frame_infos,
+            height=26
+        )
+
+        self.entry_echeance = ctk.CTkEntry(
+            frame_infos,
+            height=26
+        )
+
+        self.entry_client.grid(
+            row=4,
+            column=0,
+            sticky="ew",
+            padx=(8, 0),
+            pady=(0, 4)
+        )
+
+        self.entry_echeance.grid(
+            row=4,
+            column=2,
+            sticky="ew",
+            padx=(5, 8),
+            pady=(0, 4)
+        )
+
+        btn_client = ctk.CTkButton(
+            frame_infos,
+            text="🔍",
+            width=34,
+            height=26,
+            fg_color="#FC0411",
+            hover_color="#BB0214",
+            command=self.choisir_client
+        )
+
+        btn_client.grid(
+            row=4,
+            column=1,
+            padx=5,
+            sticky="w"
+        )
+
+        # ===========================
+        # Ligne 3
+        # ===========================
+
+        ctk.CTkLabel(
+            frame_infos,
+            text="Immatriculation"
+        ).grid(
+            row=5,
+            column=0,
+            sticky="w",
+            padx=8
+        )
+
+        ctk.CTkLabel(
+            frame_infos,
+            text="Statut"
+        ).grid(
+            row=5,
+            column=2,
+            sticky="w",
+            padx=8
+        )
+
+        self.entry_immat = ctk.CTkEntry(
+            frame_infos,
+            height=26
+        )
+
+        self.combo_statut = ctk.CTkComboBox(
+            frame_infos,
+            values=[
+                "En attente",
+                "Accepté",
+                "Refusé",
+                "Transformé en OR"
+            ],
+            height=26
+        )
+
+        self.combo_statut.set("En attente")
+
+        self.entry_immat.grid(
+            row=6,
+            column=0,
+            sticky="ew",
+            padx=(8, 0),
+            pady=(0, 6)
+        )
+
+        self.combo_statut.grid(
+            row=6,
+            column=2,
+            sticky="ew",
+            padx=(5, 8),
+            pady=(0, 6)
+        )
+
+        btn_vehicule = ctk.CTkButton(
+            frame_infos,
+            text="🔍",
+            width=34,
+            height=26,
+            fg_color="#FC0411",
+            hover_color="#BB0214",
+            command=self.choisir_vehicule
+        )
+
+        btn_vehicule.grid(
+            row=6,
+            column=1,
+            padx=5,
+            sticky="w"
+        )
+
+          # =====================================================
+        # PRESTATIONS
+        # =====================================================
+
+        frame_prestations = ctk.CTkFrame(
+            self.droite,
+            fg_color="#0A0606",
+            corner_radius=10,
+            height=160
+        )
+
+        frame_prestations.pack(
+            fill="both",
+            expand=True,
+            padx=20,
+            pady=(0, 5)
+        )
+
+        frame_prestations.pack_propagate(False)
+
+        ctk.CTkLabel(
+            frame_prestations,
+            text="🔧 Prestations",
+            font=("Arial", 12, "bold")
+        ).pack(anchor="w", padx=10, pady=(6, 4))
+
+        # ======================================
+        # Barre de boutons
+        # ======================================
+
+        barre = ctk.CTkFrame(
+            frame_prestations,
+            fg_color="transparent"
+        )
+
+        barre.pack(
+            fill="x",
+            padx=10,
+            pady=(0, 5)
+        )
+
+        ctk.CTkButton(
+            barre,
+            text="➕ Ajouter",
+            width=120,
+            height=28,
+            fg_color="#FC0411",
+            hover_color="#BB0214",
+            command=self.ajouter_prestation
+        ).pack(side="left", padx=(0, 5))
+
+        ctk.CTkButton(
+            barre,
+            text="✏ Modifier",
+            width=120,
+            height=28,
+            fg_color="#FC0411",
+            hover_color="#BB0214",
+            command=self.modifier_prestation
+        ).pack(side="left", padx=(0, 5))
+
+        ctk.CTkButton(
+            barre,
+            text="🗑 Supprimer",
+            width=120,
+            height=28,
+            fg_color="#FC0411",
+            hover_color="#BB0214",
+            command=self.supprimer_prestation
+        ).pack(side="left")
+
+        # ======================================
+        # Tableau des prestations
+        # ======================================
+
+        frame_table = ctk.CTkFrame(
+            frame_prestations,
+            fg_color="transparent"
+        )
+
+        frame_table.pack(
+            fill="both",
+            expand=True,
+            padx=10,
+            pady=(0, 10)
+        )
+
+        style = ttk.Style()
+
+        style.configure(
+            "Prestations.Treeview",
+            background="white",
+            foreground="black",
+            fieldbackground="white",
+            rowheight=26
+        )
+
+        self.table_prestations = ttk.Treeview(
+            frame_table,
+            columns=(
+                "designation",
+                "quantite",
+                "heures",
+                "minutes",
+                "pu",
+                "total"
+            ),
+            show="headings",
+            style="Prestations.Treeview"
+        )
+
+        self.table_prestations.heading(
+            "designation",
+            text="Désignation"
+        )
+
+        self.table_prestations.heading(
+            "quantite",
+            text="Qté"
+        )
+
+        self.table_prestations.heading(
+            "heures",
+            text="H"
+        )
+
+        self.table_prestations.heading(
+            "minutes",
+            text="Min"
+        )
+
+        self.table_prestations.heading(
+            "pu",
+            text="PU HT"
+        )
+
+        self.table_prestations.heading(
+            "total",
+            text="Total HT"
+        )
+
+        self.table_prestations.column(
+            "designation",
+            width=420
+        )
+
+        self.table_prestations.column(
+            "quantite",
+            width=70,
+            anchor="center"
+        )
+
+        self.table_prestations.column(
+            "heures",
+            width=55,
+            anchor="center"
+        )
+
+        self.table_prestations.column(
+            "minutes",
+            width=60,
+            anchor="center"
+        )
+
+        self.table_prestations.column(
+            "pu",
+            width=100,
+            anchor="e"
+        )
+
+        self.table_prestations.column(
+            "total",
+            width=110,
+            anchor="e"
+        )
+
+        scroll_prestations = ttk.Scrollbar(
+            frame_table,
+            orient="vertical",
+            command=self.table_prestations.yview
+        )
+
+        self.table_prestations.configure(
+            yscrollcommand=scroll_prestations.set
+        )
+
+        self.table_prestations.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        scroll_prestations.pack(
+            side="right",
+            fill="y"
+        )
+
+          # =====================================================
+        # OBSERVATIONS
+        # =====================================================
+
+        frame_observations = ctk.CTkFrame(
+            self.droite,
+            height=80,
+            fg_color="#0A0606",
+            corner_radius=10
+        )
+
+        frame_observations.pack(
+            fill="x",
+            padx=10,
+            pady=(5, 5)
+        )
+
+        frame_observations.pack_propagate(False)
+
+        ctk.CTkLabel(
+            frame_observations,
+            text="📝 Observations",
+            font=("Arial", 12, "bold")
+        ).pack(anchor="w", padx=10, pady=(5, 3))
+
+        self.txt_observations = ctk.CTkTextbox(
+            frame_observations,
+            height=45
+        )
+
+        self.txt_observations.pack(
+            fill="both",
+            expand=True,
+            padx=10,
+            pady=(0, 8)
+        )
+
+        # =====================================================
+        # TOTAUX
+        # =====================================================
+
+        frame_totaux = ctk.CTkFrame(
+            self.droite,
+            height=80,
+            fg_color="#0A0606",
+            corner_radius=10
+        )
+
+        frame_totaux.pack(
+            fill="x",
+            padx=20,
+            pady=(5, 10)
+        )
+
+        frame_totaux.pack_propagate(False)
+
+        frame_totaux.grid_columnconfigure(1, weight=1)
+        frame_totaux.grid_columnconfigure(3, weight=1)
+
+        # ---------- Ligne 1 ----------
+
+        ctk.CTkLabel(
+            frame_totaux,
+            text="Total HT"
+        ).grid(row=0, column=0, sticky="w", padx=10, pady=(5, 2))
+
+        self.label_ht = ctk.CTkLabel(
+            frame_totaux,
+            text="0,00 €"
+        )
+
+        self.label_ht.grid(row=0, column=1, sticky="w")
+
+        ctk.CTkLabel(
+            frame_totaux,
+            text="TVA (0%)"
+        ).grid(row=0, column=2, sticky="w", padx=(20, 10))
+
+        self.label_tva = ctk.CTkLabel(
+            frame_totaux,
+            text="0,00 €"
+        )
+
+        self.label_tva.grid(row=0, column=3, sticky="w")
+
+        # ---------- Ligne 2 ----------
+
+        ctk.CTkLabel(
+            frame_totaux,
+            text="Remise"
+        ).grid(row=1, column=0, sticky="w", padx=10)
+
+        self.entry_remise = ctk.CTkEntry(
+            frame_totaux,
+            width=90,
+            height=26
+        )
+
+        self.entry_remise.insert(0, "0")
+
+        self.entry_remise.grid(
+            row=1,
+            column=1,
+            sticky="w"
+        )
+        self.entry_remise.bind(
+            "<KeyRelease>",
+            lambda e: self.calculer_totaux()
+        )
+
+        ctk.CTkLabel(
+            frame_totaux,
+            text="Acompte"
+        ).grid(row=1, column=2, sticky="w", padx=(20, 10))
+
+        self.entry_deja_verse = ctk.CTkEntry(
+            frame_totaux,
+            width=90,
+            height=26
+        )
+
+        self.entry_deja_verse.insert(0, "0")
+
+        self.entry_deja_verse.grid(
+            row=1,
+            column=3,
+            sticky="w"
+        )
+        self.entry_deja_verse.bind(
+            "<KeyRelease>",
+            lambda e: self.calculer_totaux()
+        )
+
+        # ---------- Ligne 3 ----------
+
+        ctk.CTkLabel(
+            frame_totaux,
+            text="TOTAL TTC",
+            font=("Arial", 16, "bold")
+        ).grid(
+            row=2,
+            column=0,
+            sticky="w",
+            padx=10,
+            pady=(4, 4)
+        )
+
+        self.label_ttc = ctk.CTkLabel(
+            frame_totaux,
+            text="0,00 €",
+            font=("Arial", 16, "bold"),
+            text_color="#D72638"
+        )
+
+        self.label_ttc.grid(
+            row=2,
+            column=1,
+            sticky="w"
+        )
+
+        ctk.CTkLabel(
+            frame_totaux,
+            text="Reste à payer",
+            font=("Arial", 16, "bold")
+        ).grid(
+            row=2,
+            column=2,
+            sticky="w",
+            padx=(20, 10)
+        )
+
+        self.label_reste = ctk.CTkLabel(
+            frame_totaux,
+            text="0,00 €",
+            font=("Arial", 16, "bold"),
+            text_color="#D72638"
+        )
+
+        self.label_reste.grid(
+            row=2,
+            column=3,
+            sticky="w"
+        )
+
+     # =====================================================
+    # BASE DE DONNÉES
+    # =====================================================
+
+    def verifier_base(self):
+
+        self.cur.execute("""
+            CREATE TABLE IF NOT EXISTS devis(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                numero TEXT UNIQUE,
+                date TEXT,
+                client TEXT,
+                client_id INTEGER,
+                immatriculation TEXT,
+                statut TEXT,
+                echeance TEXT,
+                observations TEXT,
+                remise REAL DEFAULT 0,
+                deja_verse REAL DEFAULT 0,
+                total_ht REAL DEFAULT 0,
+                tva REAL DEFAULT 0,
+                total_ttc REAL DEFAULT 0
+            )
+        """)
+
+        self.cur.execute("""
+            CREATE TABLE IF NOT EXISTS lignes_devis(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                devis_id INTEGER,
+                designation TEXT,
+                quantite REAL,
+                heures INTEGER DEFAULT 0,
+                minutes INTEGER DEFAULT 0,
+                prix_ht REAL,
+                total REAL,
+                FOREIGN KEY(devis_id) REFERENCES devis(id)
+            )
+        """)
+
+        self.conn.commit()
+
+
+    # =====================================================
+    # NUMÉRO DE DEVIS
+    # =====================================================
+
+    def generer_numero_devis(self):
+
+        annee = datetime.now().year
+
+        self.cur.execute("""
+            SELECT numero
+            FROM devis
+            WHERE numero LIKE ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (f"DV-{annee}-%",))
+
+        resultat = self.cur.fetchone()
+
+        if resultat:
+            numero = int(resultat[0].split("-")[-1]) + 1
+        else:
+            numero = 1
+
+        return f"DV-{annee}-{numero:04d}"
+
+
+    # =====================================================
+    # NOUVEAU DEVIS
+    # =====================================================
+
+    def nouveau_devis(self):
+
+        self.devis_id = None
+        self.client_id = None
+
+        self.entry_numero.delete(0, "end")
+        self.entry_numero.insert(0, self.generer_numero_devis())
+
+        self.entry_date.delete(0, "end")
+        self.entry_date.insert(
+            0,
+            datetime.now().strftime("%d/%m/%Y")
+        )
+
+        self.entry_client.delete(0, "end")
+        self.entry_immat.delete(0, "end")
+
+        self.combo_statut.set("En attente")
+
+        echeance = datetime.now() + timedelta(days=30)
+
+        self.entry_echeance.delete(0, "end")
+        self.entry_echeance.insert(
+            0,
+            echeance.strftime("%d/%m/%Y")
+        )
+
+        self.txt_observations.delete("1.0", "end")
+
+        self.entry_remise.delete(0, "end")
+        self.entry_remise.insert(0, "0")
+
+
+        self.entry_deja_verse.delete(0, "end")
+        self.entry_deja_verse.insert(0, "0")
+
+        self.label_ht.configure(text="0,00 €")
+        self.label_tva.configure(text="0,00 €")
+        self.label_ttc.configure(text="0,00 €")
+        self.label_reste.configure(text="0,00 €")
 
         for item in self.table_prestations.get_children():
-            valeurs = self.table_prestations.item(item, "values")
+            self.table_prestations.delete(item)
+
+        self.fenetre.focus_force()
+
+        self.entry_client.focus_set()
+
+     # =====================================================
+    # CHARGER LA LISTE DES DEVIS
+    # =====================================================
+
+    def charger_liste_devis(self):
+
+        for item in self.table_devis.get_children():
+            self.table_devis.delete(item)
+
+        self.cur.execute("""
+            SELECT numero, client, date
+            FROM devis
+            ORDER BY id DESC
+        """)
+
+        for devis in self.cur.fetchall():
+            self.table_devis.insert("", "end", values=devis)
+
+
+    # =====================================================
+    # OUVRIR UN DEVIS
+    # =====================================================
+
+    def ouvrir_devis(self, event=None):
+
+        selection = self.table_devis.selection()
+
+        if not selection:
+            return
+
+        numero = self.table_devis.item(selection[0])["values"][0]
+
+        self.cur.execute("""
+            SELECT
+                id,
+                numero,
+                date,
+                client,
+                client_id,
+                immatriculation,
+                statut,
+                echeance,
+                observations,
+                remise,
+                deja_verse,
+                total_ht,
+                tva,
+                total_ttc
+            FROM devis
+            WHERE numero=?
+        """, (numero,))
+
+        devis = self.cur.fetchone()
+
+        if devis is None:
+            return
+
+        self.devis_id = devis[0]
+        self.client_id = devis[4]
+
+        self.entry_numero.delete(0, "end")
+        self.entry_numero.insert(0, devis[1])
+
+        self.entry_date.delete(0, "end")
+        self.entry_date.insert(0, devis[2])
+
+        self.entry_client.delete(0, "end")
+        self.entry_client.insert(0, devis[3])
+
+        self.entry_immat.delete(0, "end")
+        self.entry_immat.insert(0, devis[5])
+
+        self.combo_statut.set(devis[6])
+
+        self.entry_echeance.delete(0, "end")
+        self.entry_echeance.insert(0, devis[7] or "")
+
+        self.txt_observations.delete("1.0", "end")
+        self.txt_observations.insert("1.0", devis[8] or "")
+
+        self.entry_remise.delete(0, "end")
+        self.entry_remise.insert(0, str(devis[9]))
+
+        self.entry_deja_verse.delete(0, "end")
+        self.entry_deja_verse.insert(0, str(devis[10]))
+
+        # Vider le tableau des prestations
+
+        for item in self.table_prestations.get_children():
+            self.table_prestations.delete(item)
+
+        # Charger les prestations
+
+        self.cur.execute("""
+            SELECT
+                designation,
+                quantite,
+                heures,
+                minutes,
+                prix_ht,
+                total
+            FROM lignes_devis
+            WHERE devis_id=?
+        """, (self.devis_id,))
+
+        for ligne in self.cur.fetchall():
+
+            self.table_prestations.insert(
+                "",
+                "end",
+                values=ligne
+            )
+
+        self.calculer_totaux()
+        self.entry_client.focus_set()
+
+     # =====================================================
+    # CALCUL DES TOTAUX
+    # =====================================================
+
+    def calculer_totaux(self):
+
+        total_ht = 0.0
+
+        # Calcul des prestations
+        for item in self.table_prestations.get_children():
+
+            valeurs = self.table_prestations.item(item)["values"]
+
+            if len(valeurs) != 6:
+                continue
 
             try:
-                montant_ht += float(valeurs[3]) * float(valeurs[2])
-                tva += (float(valeurs[3]) * float(valeurs[2])) * float(valeurs[4]) / 100
-                montant_ttc += float(valeurs[5])
-            except:
+                total_ht += float(str(valeurs[5]).replace(",", "."))
+            except Exception:
                 pass
 
-        for champ, valeur in [
-            ("Montant HT", montant_ht),
-            ("TVA", tva),
-            ("Montant TTC", montant_ttc),
-        ]:
-            self.entrees[champ].configure(state="normal")
-            self.entrees[champ].delete(0, "end")
-            self.entrees[champ].insert(0, f"{valeur:.2f}")
-            self.entrees[champ].configure(state="readonly")
-    
-    
+        # Remise
+        try:
+            remise = float(
+                self.entry_remise.get().replace(",", ".")
+            )
+        except:
+            remise = 0.0
+
+        # TVA
+        tva = 0.0
+
+        # Total TTC
+        total_ttc = total_ht + tva - remise
+
+        # Déjà versé
+        try:
+            deja_verse = float(
+                self.entry_deja_verse.get().replace(",", ".")
+            )
+        except:
+            deja_verse = 0.0
+
+        reste = total_ttc - deja_verse
+
+        # Affichage
+
+        self.label_ht.configure(
+            text=f"{total_ht:.2f} €"
+        )
+
+        self.label_tva.configure(
+            text=f"{tva:.2f} €"
+        )
+
+        self.label_ttc.configure(
+            text=f"{total_ttc:.2f} €"
+        )
+
+        self.label_reste.configure(
+            text=f"{reste:.2f} €"
+        )
+
+     # =====================================================
+    # ENREGISTRER LE DEVIS
+    # =====================================================
+
     def enregistrer_devis(self):
 
-        # Création ou modification du devis
-        if self.devis_selectionne is None:
+        # ---------- Montants ----------
+
+        try:
+            remise = float(self.entry_remise.get().replace(",", "."))
+        except:
+            remise = 0.0
+
+        try:
+            deja_verse = float(self.entry_deja_verse.get().replace(",", "."))
+        except:
+            deja_verse = 0.0
+
+        total_ht = float(
+            self.label_ht.cget("text")
+            .replace("€", "")
+            .replace(",", ".")
+            .strip()
+        )
+
+        tva = float(
+            self.label_tva.cget("text")
+            .replace("€", "")
+            .replace(",", ".")
+            .strip()
+        )
+
+        total_ttc = float(
+            self.label_ttc.cget("text")
+            .replace("€", "")
+            .replace(",", ".")
+            .strip()
+        )
+
+        # =====================================================
+        # NOUVEAU DEVIS
+        # =====================================================
+
+        if self.devis_id is None:
 
             self.cur.execute("""
+
                 INSERT INTO devis (
+
                     numero,
                     date,
                     client,
+                    client_id,
                     immatriculation,
-                    montant_ht,
+                    statut,
+                    echeance,
+                    observations,
+                    remise,
+                    deja_verse,
+                    total_ht,
                     tva,
-                    montant_ttc
+                    total_ttc
+
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+
             """, (
-                self.entrees["Numéro devis"].get(),
-                self.entrees["Date"].get(),
-                self.entrees["Client"].get(),
-                self.entrees["Immatriculation"].get(),
-                float(self.entrees["Montant HT"].get() or 0),
-                float(self.entrees["TVA"].get() or 0),
-                float(self.entrees["Montant TTC"].get() or 0)
+
+                self.entry_numero.get(),
+                self.entry_date.get(),
+                self.entry_client.get(),
+                self.client_id,
+                self.entry_immat.get(),
+                self.combo_statut.get(),
+                self.entry_echeance.get(),
+                self.txt_observations.get("1.0", "end").strip(),
+                remise,
+                deja_verse,
+                total_ht,
+                tva,
+                total_ttc
+
             ))
 
-            devis_id = self.cur.lastrowid
+            self.conn.commit()
+
+            self.devis_id = self.cur.lastrowid
+
+        # =====================================================
+        # MODIFICATION
+        # =====================================================
 
         else:
 
-            devis_id = self.devis_selectionne
-
             self.cur.execute("""
+
                 UPDATE devis
+
                 SET
+
                     numero=?,
                     date=?,
                     client=?,
+                    client_id=?,
                     immatriculation=?,
-                    montant_ht=?,
+                    statut=?,
+                    echeance=?,
+                    observations=?,
+                    remise=?,
+                    deja_verse=?,
+                    total_ht=?,
                     tva=?,
-                    montant_ttc=?
+                    total_ttc=?
+
                 WHERE id=?
+
             """, (
-                self.entrees["Numéro devis"].get(),
-                self.entrees["Date"].get(),
-                self.entrees["Client"].get(),
-                self.entrees["Immatriculation"].get(),
-                float(self.entrees["Montant HT"].get() or 0),
-                float(self.entrees["TVA"].get() or 0),
-                float(self.entrees["Montant TTC"].get() or 0),
-                devis_id
+
+                self.entry_numero.get(),
+                self.entry_date.get(),
+                self.entry_client.get(),
+                self.client_id,
+                self.entry_immat.get(),
+                self.combo_statut.get(),
+                self.entry_echeance.get(),
+                self.txt_observations.get("1.0", "end").strip(),
+                remise,
+                deja_verse,
+                total_ht,
+                tva,
+                total_ttc,
+                self.devis_id
+
             ))
 
-            # Supprime les anciennes prestations
-            self.cur.execute(
-                "DELETE FROM lignes_devis WHERE devis_id=?",
-                (devis_id,)
-            )
+            self.conn.commit()
 
-        # Enregistre les prestations du Treeview
+             # =====================================================
+        # ENREGISTREMENT DES PRESTATIONS
+        # =====================================================
+
+        self.cur.execute(
+            "DELETE FROM lignes_devis WHERE devis_id=?",
+            (self.devis_id,)
+        )
+
         for item in self.table_prestations.get_children():
 
-            valeurs = self.table_prestations.item(item, "values")
+            valeurs = self.table_prestations.item(item)["values"]
+
+            if len(valeurs) != 6:
+                continue
+
+            designation = str(valeurs[0])
+
+            try:
+                quantite = float(valeurs[1])
+            except:
+                quantite = 1.0
+
+            try:
+                heures = int(valeurs[2])
+            except:
+                heures = 0
+
+            try:
+                minutes = int(valeurs[3])
+            except:
+                minutes = 0
+
+            try:
+                prix_ht = float(str(valeurs[4]).replace(",", "."))
+            except:
+                prix_ht = 0.0
+
+            try:
+                total = float(str(valeurs[5]).replace(",", "."))
+            except:
+                total = 0.0
 
             self.cur.execute("""
-                INSERT INTO lignes_devis (
+                INSERT INTO lignes_devis
+                (
                     devis_id,
-                    reference,
                     designation,
                     quantite,
+                    heures,
+                    minutes,
+                    temps_heures_unitaire,
+                    temps_minutes_unitaire,
                     prix_ht,
-                    tva,
                     total
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?,?,?,?,?,?,?,?,?)
             """, (
-                devis_id,
-                valeurs[0],
-                valeurs[1],
-                float(valeurs[2] or 0),
-                float(valeurs[3] or 0),
-                float(valeurs[4] or 0),
-                float(valeurs[5] or 0)
+
+                self.devis_id,
+                designation,
+                quantite,
+                heures,
+                minutes,
+
+                heures,   #Temps unitaire(provisoirement)
+                minutes,  #Temps unitaire(provisoirement)
+                
+                prix_ht,
+                total
+
             ))
-        print("ID devis :", devis_id)
-        self.cur.execute(
-           "SELECT * FROM lignes_devis WHERE devis_id=?",
-           (devis_id,)
-        )
-        print(self.cur.fetchall())
+
         self.conn.commit()
 
-        self.devis_selectionne = None
+        # =====================================================
+        # FIN
+        # =====================================================
 
-        self.charger_devis()
+        self.charger_liste_devis()
 
         messagebox.showinfo(
-            "Succès",
-            "Devis enregistré avec succès."
+            "FMS Manager",
+            "Le devis a été enregistré avec succès."
         )
 
-    def modifier_devis(self):
-        from tkinter import messagebox
+     # =====================================================
+    # FENÊTRE AJOUT / MODIFICATION PRESTATION
+    # =====================================================
 
-        print("MODIFIER :", self.devis_selectionne)
+    def ouvrir_fenetre_prestation(self, mode="ajout", item=None):
 
-        if self.devis_selectionne is None:
+        fenetre = ctk.CTkToplevel(self.fenetre)
+        fenetre.title("Prestation")
+        fenetre.geometry("520x420")
+        fenetre.resizable(False, False)
+        fenetre.grab_set()
+
+        # ==========================================
+        # Désignation
+        # ==========================================
+
+        ctk.CTkLabel(
+            fenetre,
+            text="Désignation"
+        ).pack(pady=(15,5))
+
+        entry_designation = ctk.CTkEntry(
+            fenetre,
+            width=420
+        )
+        entry_designation.pack()
+
+        # ==========================================
+        # Quantité
+        # ==========================================
+
+        ctk.CTkLabel(
+            fenetre,
+            text="Quantité"
+        ).pack(pady=(12,5))
+
+        entry_qte = ctk.CTkEntry(
+            fenetre,
+            width=120
+        )
+        entry_qte.insert(0,"1")
+        entry_qte.pack()
+
+        # ==========================================
+        # Heures
+        # ==========================================
+
+        ctk.CTkLabel(
+            fenetre,
+            text="Heures"
+        ).pack(pady=(12,5))
+
+        entry_heures = ctk.CTkEntry(
+            fenetre,
+            width=120
+        )
+        entry_heures.insert(0,"0")
+        entry_heures.pack()
+
+        # ==========================================
+        # Minutes
+        # ==========================================
+
+        ctk.CTkLabel(
+            fenetre,
+            text="Minutes"
+        ).pack(pady=(12,5))
+
+        entry_minutes = ctk.CTkEntry(
+            fenetre,
+            width=120
+        )
+        entry_minutes.insert(0,"0")
+        entry_minutes.pack()
+
+        # ==========================================
+        # Prix HT
+        # ==========================================
+
+        ctk.CTkLabel(
+            fenetre,
+            text="Prix HT"
+        ).pack(pady=(12,5))
+
+        entry_prix = ctk.CTkEntry(
+            fenetre,
+            width=140
+        )
+        entry_prix.pack()
+         # ==========================================
+        # Si modification
+        # ==========================================
+
+        if mode == "modification" and item is not None:
+
+            valeurs = self.table_prestations.item(item)["values"]
+
+            entry_designation.insert(0, valeurs[0])
+
+            entry_qte.delete(0, "end")
+            entry_qte.insert(0, str(valeurs[1]))
+
+            entry_heures.delete(0, "end")
+            entry_heures.insert(0, str(valeurs[2]))
+
+            entry_minutes.delete(0, "end")
+            entry_minutes.insert(0, str(valeurs[3]))
+
+            entry_prix.delete(0, "end")
+            entry_prix.insert(0, str(valeurs[4]))
+
+
+        # ==========================================
+        # Validation
+        # ==========================================
+
+        def valider():
+
+            try:
+
+                qte = float(entry_qte.get().replace(",", "."))
+
+                prix = float(entry_prix.get().replace(",", "."))
+
+                if mode == "modification" and item in self.temps_unitaires:
+
+                    h_unitaire, m_unitaire = self.temps_unitaires[item]
+
+                    total_minutes = int((h_unitaire * 60 + m_unitaire) * qte)
+
+                    heures = total_minutes // 60
+                    minutes = total_minutes % 60
+
+                else:
+
+                    heures = int(entry_heures.get() or 0)
+                    minutes = int(entry_minutes.get() or 0)
+
+            except ValueError:
+
+                messagebox.showerror(
+                    "Erreur",
+                    "Veuillez saisir des valeurs numériques."
+                )
+                return
+
+
+            total = round(qte * prix, 2)
+
+            valeurs = (
+                entry_designation.get(),
+                qte,
+                heures,
+                minutes,
+                prix,
+                total
+            )
+
+            if mode == "ajout":
+
+                self.table_prestations.insert(
+                    "",
+                    "end",
+                    values=valeurs
+                )
+
+            else:
+
+                self.table_prestations.item(
+                    item,
+                    values=valeurs
+                )
+            if item in self.temps_unitaires:
+                self.temps_unitaires[item]=(heures, minutes)
+            self.calculer_totaux()
+
+            fenetre.destroy()
+
+
+        # ==========================================
+        # Boutons
+        # ==========================================
+
+        ctk.CTkButton(
+            fenetre,
+            text="Valider",
+            width=180,
+            fg_color="#FC0411",
+            hover_color="#BB0214",
+            command=valider
+        ).pack(pady=(20,8))
+
+        ctk.CTkButton(
+            fenetre,
+            text="Annuler",
+            width=180,
+            fg_color="gray",
+            command=fenetre.destroy
+        ).pack()
+
+     # =====================================================
+    # AJOUTER UNE PRESTATION
+    # =====================================================
+
+    def ajouter_prestation(self):
+
+        CataloguePrestations(
+
+        self.fenetre,
+
+        self.retour_prestation
+
+    )
+
+
+    # =====================================================
+    # MODIFIER UNE PRESTATION
+    # =====================================================
+
+    def modifier_prestation(self):
+
+        selection = self.table_prestations.selection()
+
+        if not selection:
+
             messagebox.showwarning(
-                "Modification",
-                "Sélectionnez un devis dans la liste."
+                "FMS Manager",
+                "Sélectionnez une prestation."
             )
             return
 
-        self.enregistrer_devis()
+        self.ouvrir_fenetre_prestation(
+            mode="modification",
+            item=selection[0]
+        )
 
 
-     
+    # =====================================================
+    # SUPPRIMER UNE PRESTATION
+    # =====================================================
+
+    def supprimer_prestation(self):
+
+        selection = self.table_prestations.selection()
+
+        if not selection:
+
+            messagebox.showwarning(
+                "FMS Manager",
+                "Sélectionnez une prestation."
+            )
+            return
+
+        if not messagebox.askyesno(
+            "Confirmation",
+            "Voulez-vous supprimer cette prestation ?"
+        ):
+            return
+
+        self.table_prestations.delete(selection[0])
+
+        self.calculer_totaux()
+
+     # =====================================================
+    # RETOUR CATALOGUE PRESTATIONS
+    # =====================================================
+
+    def retour_prestation(self, valeurs):
+
+        (
+            reference,
+            designation,
+            categorie,
+            prix_ht,
+            tva,
+            prix_ttc,
+            temps_heures,
+            temps_minutes
+        ) = valeurs
+        item =self.table_prestations.insert(
+
+            "",
+
+            "end",
+
+            values=(
+
+                designation,
+                1,          # Quantité
+                int(temps_heures),          # Heures
+                int(temps_minutes),          # Minutes
+                float(prix_ht),
+                float(prix_ht)
+
+            )
+
+        )
+        self.temps_unitaires[item]=(
+            int(temps_heures),
+            int(temps_minutes)
+        )
+
+        self.calculer_totaux()
+
+       # =====================================================
+    # CHOISIR UN CLIENT
+    # =====================================================
+
+    def choisir_client(self):
+
+        SelectionClient(
+            self.fenetre,
+            self.retour_client
+        )
+
+
+    # =====================================================
+    # RETOUR CLIENT
+    # =====================================================
+
+    def retour_client(self, valeurs):
+
+        client_id, type_client, nom, prenom, telephone, ville = valeurs
+
+        self.client_id = client_id
+
+        self.entry_client.delete(0, "end")
+
+        if type_client.lower() == "particulier":
+
+            self.entry_client.insert(
+                0,
+                f"{nom} {prenom}"
+            )
+
+        else:
+
+            self.entry_client.insert(
+                0,
+                nom
+            )
+
+
+    # =====================================================
+    # CHOISIR UN VÉHICULE
+    # =====================================================
+
+    def choisir_vehicule(self):
+
+        if self.client_id is None:
+
+            messagebox.showwarning(
+                "FMS Manager",
+                "Sélectionnez d'abord un client."
+            )
+            return
+
+        SelectionVehicule(
+
+            self.fenetre,
+
+            self.retour_vehicule,
+
+            self.client_id
+
+        )
+
+
+    # =====================================================
+    # RETOUR VÉHICULE
+    # =====================================================
+
+    def retour_vehicule(self, valeurs):
+
+        (
+            immatriculation,
+            marque,
+            modele,
+            motorisation,
+            nom,
+            prenom
+        ) = valeurs
+
+        self.entry_immat.delete(0, "end")
+        self.entry_immat.insert(
+            0,
+            immatriculation
+        )
+
+        self.entry_client.delete(0, "end")
+        self.entry_client.insert(
+            0,
+            f"{nom} {prenom}"
+        )
+
+     # =====================================================
+    # IMPRIMER / GÉNÉRER LE PDF
+    # =====================================================
+
+    def imprimer_pdf(self):
+
+        # ==========================================
+        # Vérifications
+        # ==========================================
+
+        if self.client_id is None:
+
+            messagebox.showwarning(
+                "FMS Manager",
+                "Veuillez sélectionner un client."
+            )
+            return
+
+        if self.devis_id is None:
+
+            messagebox.showwarning(
+                "FMS Manager",
+                "Veuillez enregistrer le devis avant de générer le PDF."
+            )
+            return
+
+        # ==========================================
+        # Informations client
+        # ==========================================
+
+        self.cur.execute("""
+
+            SELECT
+
+                prenom,
+                telephone,
+                email,
+                adresse,
+                code_postal,
+                ville
+
+            FROM clients
+
+            WHERE id=?
+
+        """, (self.client_id,))
+
+        client = self.cur.fetchone()
+
+        if client is None:
+
+            messagebox.showerror(
+                "FMS Manager",
+                "Impossible de retrouver le client."
+            )
+            return
+
+        # ==========================================
+        # Informations véhicule
+        # ==========================================
+
+        self.cur.execute("""
+
+            SELECT
+
+                marque,
+                modele,
+                kilometrage
+
+            FROM vehicules
+
+            WHERE immatriculation=?
+
+        """, (self.entry_immat.get(),))
+
+        vehicule = self.cur.fetchone()
+
+        if vehicule is None:
+
+            messagebox.showerror(
+                "FMS Manager",
+                "Impossible de retrouver le véhicule."
+            )
+            return
+
+        # ==========================================
+        # Prestations
+        # ==========================================
+
+        prestations = []
+
+        for item in self.table_prestations.get_children():
+
+            designation, qte, heures, minutes, prix_ht, total = \
+                self.table_prestations.item(item)["values"]
+
+            prestations.append(
+
+                (
+
+                    "",
+
+                    designation,
+
+                    qte,
+
+                    prix_ht,
+
+                    0,
+
+                    total
+
+                )
+
+            )
+
+               # ==========================================
+        # Génération du PDF
+        # ==========================================
+
+        fichier = pdf_manager.creer_pdf(
+
+            numero=self.entry_numero.get(),
+            date=self.entry_date.get(),
+
+            client=self.entry_client.get(),
+            immatriculation=self.entry_immat.get(),
+
+            prenom=client[0],
+            telephone=client[1],
+            email=client[2],
+            adresse=client[3],
+            code_postal=client[4],
+            ville=client[5],
+
+            marque=vehicule[0],
+            modele=vehicule[1],
+            kilometrage=vehicule[2],
+
+            prestations=prestations,
+
+            montant_ht=float(
+                self.label_ht.cget("text")
+                .replace("€", "")
+                .replace(",", ".")
+                .strip()
+            ),
+
+            tva=float(
+                self.label_tva.cget("text")
+                .replace("€", "")
+                .replace(",", ".")
+                .strip()
+            ),
+
+            montant_ttc=float(
+                self.label_ttc.cget("text")
+                .replace("€", "")
+                .replace(",", ".")
+                .strip()
+            )
+
+        )
+
+        # ==========================================
+        # Fin
+        # ==========================================
+
+        messagebox.showinfo(
+            "FMS Manager",
+            f"PDF créé avec succès.\n\n{fichier}"
+        )
+
+        try:
+
+            win32api.ShellExecute(
+                0,
+                "open",
+                fichier,
+                None,
+                ".",
+                1
+            )
+
+        except Exception:
+            pass
+
+        return fichier
+
+     # =====================================================
+    # ENVOYER LE DEVIS PAR E-MAIL
+    # =====================================================
+
+    def envoyer_mail(self):
+
+        fen = ctk.CTkToplevel(self.fenetre)
+        fen.title("Envoyer le devis")
+        fen.geometry("620x430")
+        fen.resizable(False, False)
+        fen.grab_set()
+
+        # =============================
+        # Destinataire
+        # =============================
+
+        ctk.CTkLabel(
+            fen,
+            text="Destinataire"
+        ).pack(anchor="w", padx=20, pady=(15,0))
+
+        entry_email = ctk.CTkEntry(
+            fen,
+            width=560
+        )
+        entry_email.pack(padx=20)
+
+        email_client = database.recuperer_email_client(
+            self.client_id
+        )
+
+        if email_client:
+            entry_email.insert(0, email_client)
+
+        # =============================
+        # Objet
+        # =============================
+
+        ctk.CTkLabel(
+            fen,
+            text="Objet"
+        ).pack(anchor="w", padx=20, pady=(10,0))
+
+        entry_objet = ctk.CTkEntry(
+            fen,
+            width=560
+        )
+
+        entry_objet.pack(padx=20)
+
+        entry_objet.insert(
+            0,
+            f"Devis {self.entry_numero.get()}"
+        )
+
+        # =============================
+        # Message
+        # =============================
+
+        ctk.CTkLabel(
+            fen,
+            text="Message"
+        ).pack(anchor="w", padx=20, pady=(10,0))
+
+        txt_message = ctk.CTkTextbox(
+            fen,
+            width=560,
+            height=180
+        )
+
+        txt_message.pack(
+            padx=20,
+            pady=5
+        )
+
+        txt_message.insert(
+            "1.0",
+        f"""Bonjour,
+
+        Veuillez trouver ci-joint votre devis {self.entry_numero.get()}.
+
+        Je reste à votre disposition pour toute information complémentaire.
+
+        Cordialement,
+
+        Fred Méca Services
+        """
+        )
+         # ==========================================
+        # Fonction d'envoi
+        # ==========================================
+
+        def envoyer():
+
+            try:
+
+                pdf = self.imprimer_pdf()
+
+                msg = EmailMessage()
+
+                msg["Subject"] = entry_objet.get()
+                msg["From"] = "fred.meca.services62@gmail.com"
+                msg["To"] = entry_email.get()
+
+                msg.set_content(
+                    txt_message.get("1.0", "end")
+                )
+
+                with open(pdf, "rb") as f:
+
+                    msg.add_attachment(
+                        f.read(),
+                        maintype="application",
+                        subtype="pdf",
+                        filename=os.path.basename(pdf)
+                    )
+
+                contexte = ssl.create_default_context()
+
+                with smtplib.SMTP_SSL(
+                    "smtp.gmail.com",
+                    465,
+                    context=contexte
+                ) as smtp:
+
+                    smtp.login(
+                        "fred.meca.services62@gmail.com",
+                        "ghmbtfftprlegfco"
+                    )
+
+                    smtp.send_message(msg)
+
+                messagebox.showinfo(
+                    "FMS Manager",
+                    "Le devis a été envoyé avec succès."
+                )
+
+                fen.destroy()
+
+            except Exception as e:
+
+                messagebox.showerror(
+                    "Erreur",
+                    str(e)
+                )
+
+        # ==========================================
+        # Boutons
+        # ==========================================
+
+        ctk.CTkButton(
+
+            fen,
+
+            text="📨 Envoyer",
+
+            width=180,
+
+            fg_color="#FC0411",
+
+            hover_color="#BB0214",
+
+            command=envoyer
+
+        ).pack(pady=(10,5))
+
+        ctk.CTkButton(
+
+            fen,
+
+            text="❌ Annuler",
+
+            width=180,
+
+            fg_color="gray",
+
+            command=fen.destroy
+
+        ).pack()
+
+      # =====================================================
+    # MENU EXPORT
+    # =====================================================
+
+    def menu_export(self):
+
+        fen = ctk.CTkToplevel(self.fenetre)
+        fen.title("Exporter le devis")
+        fen.geometry("320x180")
+        fen.resizable(False, False)
+        fen.grab_set()
+
+        ctk.CTkLabel(
+            fen,
+            text="Choisissez une action",
+            font=("Arial", 16, "bold")
+        ).pack(pady=15)
+
+        ctk.CTkButton(
+
+            fen,
+
+            text="📄 Générer le PDF",
+
+            width=220,
+
+            fg_color="#FC0411",
+
+            hover_color="#BB0214",
+
+            command=lambda: [
+
+                fen.destroy(),
+
+                self.imprimer_pdf()
+
+            ]
+
+        ).pack(pady=5)
+
+        ctk.CTkButton(
+
+            fen,
+
+            text="📧 Envoyer par e-mail",
+
+            width=220,
+
+            fg_color="#FC0411",
+
+            hover_color="#BB0214",
+
+            command=lambda: [
+
+                fen.destroy(),
+
+                self.envoyer_mail()
+
+            ]
+
+        ).pack(pady=5)
+
+     # =====================================================
+    # TRANSFORMER EN ORDRE DE RÉPARATION
+    # =====================================================
+
+    def transformer_en_or(self):
+
+        if self.devis_id is None:
+
+            messagebox.showwarning(
+                "FMS Manager",
+                "Veuillez enregistrer le devis avant de le transformer."
+            )
+            return
+
+        if not messagebox.askyesno(
+            "Confirmation",
+            "Transformer ce devis en ordre de réparation ?"
+        ):
+            return
+
+        # Mise à jour du statut
+
+        self.combo_statut.set("Transformé en OR")
+
+        self.cur.execute("""
+
+            UPDATE devis
+
+            SET statut=?
+
+            WHERE id=?
+
+        """, (
+
+            "Transformé en OR",
+
+            self.devis_id
+
+        ))
+
+        self.conn.commit()
+
+        # Création de l'OR
+
+        numero_or = database.creer_or_depuis_devis(
+
+            self.entry_numero.get(),
+
+            self.entry_date.get(),
+
+            self.entry_client.get(),
+
+            self.client_id,
+
+            self.entry_immat.get(),
+
+            self.txt_observations.get(
+                "1.0",
+                "end"
+            ).strip()
+
+        )
+
+        messagebox.showinfo(
+
+            "FMS Manager",
+
+            f"""Le devis a été transformé avec succès.
+
+        Numéro OR : {numero_or}"""
+
+        )
+
+        self.charger_liste_devis()
+
+     # =====================================================
+    # SUPPRIMER UN DEVIS
+    # =====================================================
 
     def supprimer_devis(self):
-        from tkinter import messagebox
 
-        if self.devis_selectionne is None:
+        if self.devis_id is None:
+
             messagebox.showwarning(
-                "Suppression",
-                "Sélectionnez un devis à supprimer."
+                "FMS Manager",
+                "Sélectionnez un devis."
             )
             return
 
@@ -622,310 +2369,62 @@ class DevisManager:
         ):
             return
 
-        # Supprime les prestations
         self.cur.execute(
             "DELETE FROM lignes_devis WHERE devis_id=?",
-            (self.devis_selectionne,)
+            (self.devis_id,)
         )
 
-        # Supprime le devis
         self.cur.execute(
             "DELETE FROM devis WHERE id=?",
-            (self.devis_selectionne,)
-    )
+            (self.devis_id,)
+        )
 
         self.conn.commit()
 
-        self.devis_selectionne = None
+        self.nouveau_devis()
 
-        self.charger_devis()
-
-        # Vide le tableau des prestations
-        for item in self.table_prestations.get_children():
-            self.table_prestations.delete(item)
+        self.charger_liste_devis()
 
         messagebox.showinfo(
-            "Succès",
+            "FMS Manager",
             "Le devis a été supprimé."
         )
-        
-    def imprimer_devis(self):
-        import win32api
-        from tkinter import messagebox
 
-        fichier=self.exporter_pdf()
-        if not fichier:
-           return
-        try:
-           win32api.ShellExecute(
-              0,
-              "print",
-              fichier,
-              None,
-              ".",
-              0
-           )
-        except Exception:
-           messagebox.showwarning(
-              "Impression"
-              "Aucune imprimante n'est disponible.\n\n"
-              "Le devis PDF a bien été créé. \n"
-              "Connectez une imprimante pour pouvoir l'imprimer."
-           )
+     # =====================================================
+    # RECHERCHER UN DEVIS
+    # =====================================================
 
-    def apercu_devis(self):
-       import os
-       fichier=self.exporter_pdf(False)
-       if fichier:
-          os.startfile(fichier)    
+    def rechercher_devis(self, event=None):
 
-    def envoyer_email(self):
-        import os
-        import webbrowser
-        from tkinter import messagebox
+        recherche = self.entry_recherche.get().strip().lower()
 
-        fichier = self.exporter_pdf()
-
-        if not fichier:
-            return
-
-        if not hasattr(self, "email") or self.email == "":
-            messagebox.showwarning(
-                "E-mail",
-                "Aucune adresse e-mail n'est enregistrée pour ce client."
-            )
-            return
-
-        sujet = "Votre devis"
-
-        webbrowser.open(
-            f"mailto:{self.email}?subject={sujet}"
-        )
-
-        messagebox.showinfo(
-            "E-mail",
-            "Votre logiciel de messagerie va s'ouvrir.\n"
-            "Joignez simplement le PDF :\n\n"
-            + fichier
-        )
-    def exporter_pdf(self, afficher_message=True):
-
-        from tkinter import messagebox
-        from modules import pdf_manager
-
-        if self.devis_selectionne is None:
-            
-            messagebox.showwarning(
-                "PDF",
-                "Sélectionnez un devis."
-            )
-            return
-
-        prestations = []
-
-        for item in self.table_prestations.get_children():
-            prestations.append(
-                self.table_prestations.item(item)["values"]
-            )
-        print("Client :", repr(self.entrees["Client"].get()))
-        print("Immat :", repr(self.entrees["Immatriculation"].get()))
-        print("Client sélectionné :", self.entrees["Client"].get())
+        for item in self.table_devis.get_children():
+            self.table_devis.delete(item)
 
         self.cur.execute("""
-        SELECT
-            c.prenom,
-            c.telephone,
-            c.email,
-            c.adresse,
-            c.code_postal,
-            c.ville,
-            v.marque,
-            v.modele,
-            v.kilometrage
-        FROM clients c
-        LEFT JOIN vehicules v
-        ON c.id = v.client_id
-        WHERE c.nom = ?
-        AND v.immatriculation = ?
-        """,
-        (
-            self.entrees["Client"].get(),
-            self.entrees["Immatriculation"].get()
+            SELECT
+                numero,
+                client,
+                date
+            FROM devis
+            WHERE
+                LOWER(numero) LIKE ?
+                OR LOWER(client) LIKE ?
+                OR LOWER(immatriculation) LIKE ?
+            ORDER BY id DESC
+        """, (
+            f"%{recherche}%",
+            f"%{recherche}%",
+            f"%{recherche}%"
         ))
 
-        infos = self.cur.fetchone()
-        print("INFOS =", infos)
+        for ligne in self.cur.fetchall():
 
-        if infos is None:
-            raise Exception("Aucun résultat trouvé par la requête SQL")
-
-        (prenom,
-        telephone,
-        email,
-        adresse,
-        code_postal,
-        ville,
-        marque,
-        modele,
-        kilometrage) = infos
-
-
-        fichier = pdf_manager.creer_pdf(
-        numero=self.entrees["Numéro devis"].get(),
-        date=self.entrees["Date"].get(),
-        client=self.entrees["Client"].get(),
-        immatriculation=self.entrees["Immatriculation"].get(),
-        prenom=prenom,
-        telephone=telephone,
-        email=email,
-        adresse=adresse,
-        code_postal=code_postal,
-        ville=ville,
-        marque=marque,
-        modele=modele,
-        kilometrage=kilometrage,
-        prestations=prestations,
-        montant_ht=float(self.entrees["Montant HT"].get()),
-        tva=float(self.entrees["TVA"].get()),
-        montant_ttc=float(self.entrees["Montant TTC"].get())
-        )
-        if afficher_message:
-            messagebox.showinfo(
-            "PDF",
-            f"PDF créé avec succès.\n\n{fichier}"
-        )
-        return fichier
-
-    def creer_ordre_reparation(self):
-
-        if not hasattr(self, "devis_selectionne"):
-            return
-
-        prestations=[]
-        for item in self.table_prestations.get_children():
-           prestations.append(self.table_prestations.item(item)
-           ["values"])
-
-        
-        rep = reparations.ouvrir(self.parent)
-
-        rep.charger_devis(
-            self.entrees["Numéro devis"].get(),
-            self.entrees["Client"].get(),
-            self.entrees["Immatriculation"].get(),
-            prestations
-        )
- 
-    def vider_lignes(self):
-       for item in self.table_prestations.get_children():
-        self.table_prestations.delete(item)
-
-    def selectionner_devis(self, event):
-
-     selection = self.table.selection()
-
-     if not selection:
-        return
-
-     self.devis_selectionne = int(selection[0])
-
-     self.cur.execute("""
-        SELECT
-            numero,
-            date,
-            client,
-            immatriculation,
-            montant_ht,
-            tva,
-            montant_ttc
-        FROM devis
-        WHERE id=?
-     """, (self.devis_selectionne,))
-
-     devis = self.cur.fetchone()
-     self.cur.execute("""
-     SELECT email FROM clients WHERE nom=?""", (devis[2],))
-     resultat=self.cur.fetchone()
-     if resultat:
-        self.email=resultat[0]
-     else:
-        self.email=""
-
-     if not devis:
-        return
-
-     champs = [
-        "Numéro devis",
-        "Date",
-        "Client",
-        "Immatriculation",
-        "Montant HT",
-        "TVA",
-        "Montant TTC"
-     ]
-
-     for i, champ in enumerate(champs):
-
-        etat = self.entrees[champ].cget("state")
-
-        if etat == "readonly":
-            self.entrees[champ].configure(state="normal")
-        if champ == "Client":
-            self.entrees[champ].set(devis[i])
-        else:
-
-            self.entrees[champ].delete(0, "end")
-            self.entrees[champ].insert(0, devis[i])
-
-        if champ in (
-            "Numéro devis",
-            "Montant HT",
-            "TVA",
-            "Montant TTC"
-        ):
-            self.entrees[champ].configure(state="readonly")
-
-     for item in self.table_prestations.get_children():
-      self.table_prestations.delete(item)
-
-     self.cur.execute("""
-            SELECT
-                reference,
-                designation,
-                quantite,
-                prix_ht,
-                tva,
-                total
-            FROM lignes_devis
-            WHERE devis_id = ?
-            ORDER BY id
-        """, 
-    (self.devis_selectionne,))
-     lignes=self.cur.fetchall()
-     print("PRESTATIONS :", lignes)
-     for ligne in lignes:
-      self.table_prestations.insert(
-           "", "end", values=ligne
-        )
-
-
-
-    def client_selectionne(self, client):
-
-       self.cur.execute("""
-                        SELECT v.immatriculation
-            FROM vehicules v JOIN clients c ON v.client_id= c.id
-        WHERE c.nom=?
-        limit 1""",
-        (client,)
-     )
-
-       resultat = self.cur.fetchone()
-
-       if resultat:
-        self.entrees["Immatriculation"].delete(0, "end")
-        self.entrees["Immatriculation"].insert(0, resultat[0])
-
-
+            self.table_devis.insert(
+                "",
+                "end",
+                values=ligne
+            )
+    
 def ouvrir(parent):
     DevisManager(parent)

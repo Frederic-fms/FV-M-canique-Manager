@@ -35,7 +35,7 @@ class PrestationManager:
         self.fenetre.configure(fg_color=self.COULEUR_FOND)
 
         self.creer_interface()
-        #self.generer_reference()
+    
 
     def creer_interface(self):
         
@@ -121,7 +121,7 @@ class PrestationManager:
         # ==========================
         self.tree = ttk.Treeview(
             self.frame_gauche,
-            columns=("reference", "designation", "categorie", "prix_ttc"),
+            columns=("reference", "designation", "categorie", "temps", "prix_ttc"),
             show="headings",
             height=25
         )
@@ -129,11 +129,13 @@ class PrestationManager:
         self.tree.heading("reference", text="Référence")
         self.tree.heading("designation", text="Désignation")
         self.tree.heading("categorie", text="Catégorie")
+        self.tree.heading("temps", text="Temps")
         self.tree.heading("prix_ttc", text="Prix TTC")
 
         self.tree.column("reference", width=70)
         self.tree.column("designation", width=230)
         self.tree.column("categorie", width=90)
+        self.tree.column("temps", width=70)
         self.tree.column("prix_ttc", width=70)
 
 
@@ -187,9 +189,11 @@ class PrestationManager:
             ("Type de tarification", 1, 2),
             ("Unité", 2, 0),
             ("Quantité par défaut", 2, 2),
-            ("Prix HT (€)", 3, 0),
-            ("TVA (%)", 3, 2),
-            ("Prix TTC (€)", 4, 0),
+            ("Heures", 3, 0),
+            ("Minutes", 3, 2),
+            ("Prix HT (€)", 4, 0),
+            ("TVA (%)", 4, 2),
+            ("Prix TTC (€)", 5, 0),
         ]
 
         for texte, ligne, colonne in champs:
@@ -246,6 +250,21 @@ class PrestationManager:
                     "Litre"
                 ])
 
+            elif texte == "Heures":
+                entree = ctk.CTkComboBox(
+                    formulaire,
+                    width=200,
+                    values=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10" ]
+                )
+                entree.set("0")
+
+            elif texte == "Minutes":
+                entree = ctk.CTkComboBox(
+                    formulaire,
+                    width=200,
+                    values=["00", "10", "15", "30", "45", "50"]
+                )
+                entree.set("00")
             else:
                 entree =ctk.CTkEntry(formulaire,width=250)
 
@@ -281,7 +300,7 @@ class PrestationManager:
         ctk.CTkButton(
             frame_boutons,
             text="Nouveau",
-            width=140,
+            width=120,
             height=40,
             fg_color=self.COULEUR_BOUTON,
             hover_color=self.COULEUR_HOVER,
@@ -291,7 +310,7 @@ class PrestationManager:
         ctk.CTkButton(
             frame_boutons,
             text="Enregistrer",
-            width=140,
+            width=120,
             height=40,
             fg_color=self.COULEUR_BOUTON,
             hover_color=self.COULEUR_HOVER,
@@ -301,7 +320,7 @@ class PrestationManager:
         ctk.CTkButton(
             frame_boutons,
             text="Modifier",
-            width=140,
+            width=120,
             height=40,
             fg_color=self.COULEUR_BOUTON,
             hover_color=self.COULEUR_HOVER,
@@ -311,7 +330,7 @@ class PrestationManager:
         ctk.CTkButton(
             frame_boutons,
             text="Supprimer",
-            width=140,
+            width=120,
             height=40,
             fg_color=self.COULEUR_BOUTON,
             hover_color=self.COULEUR_HOVER,
@@ -321,7 +340,7 @@ class PrestationManager:
         ctk.CTkButton(
             frame_boutons,
             text="Annuler",
-            width=140,
+            width=120,
             height=40,
             fg_color="#555555",
             hover_color="#444444",
@@ -330,32 +349,15 @@ class PrestationManager:
 
         self.charger_prestations()
 
-    def generer_reference(self):
+        ctk.CTkButton(frame_boutons,
+                      text="Importer catalogue",
+                      width=120,
+                      height=40,
+                      fg_color="#0066cc",
+                      hover_color="#004c99",
+                      command=self.importer_catalogue
+                      ).pack(side="left", padx=10)
 
-        self.cur.execute("""
-            SELECT reference
-            FROM prestations
-            WHERE reference IS NOT NULL
-            ORDER BY id DESC
-            LIMIT 1
-        """)
-
-        resultat = self.cur.fetchone()
-
-        if resultat:
-
-            numero = int(resultat[0].replace("PRE", "")) + 1
-
-        else:
-
-            numero = 1
-
-        reference = f"PRE{numero:04d}"
-
-        self.entrees["Référence"].configure(state="normal")
-        self.entrees["Référence"].delete(0, "end")
-        self.entrees["Référence"].insert(0, reference)
-        self.entrees["Référence"].configure(state="readonly")
 
     def calculer_prix_ttc(self, event=None):
         try:
@@ -386,13 +388,20 @@ class PrestationManager:
             SELECT reference,
                    designation,
                    categorie,
+                   temps_heures,
+                   temps_minutes,
                    prix_ttc
             FROM prestations
             ORDER BY designation
         """)
 
-        for prestation in cur.fetchall():
-            self.tree.insert("", "end", values=prestation)
+        for ref, des, cat, h, m, prix in cur.fetchall():
+            temps= f"{h} h {m:02d}"
+            self.tree.insert(
+                "",
+                "end",
+                values=(ref, des, cat, temps, prix)
+            )
 
         conn.close()
 
@@ -409,7 +418,7 @@ class PrestationManager:
         (reference,
         designation,
         categorie, type_tarification,
-        unite, quantite, prix_ht, tva,
+        unite, quantite, prix_ht, tva, temps_heures, temps_minutes,
         prix_ttc) = prestation
 
         self.entrees["Référence"].delete(0, "end")
@@ -431,6 +440,10 @@ class PrestationManager:
         self.entrees["TVA (%)"].delete(0, "end")
         self.entrees["TVA (%)"].insert(0, str(tva))
 
+        self.entrees["Heures"].set (str(temps_heures))
+    
+        self.entrees["Minutes"].set (str(temps_minutes))
+
         self.entrees["Prix TTC (€)"].configure(state="normal")
         self.entrees["Prix TTC (€)"].delete(0, "end")
         self.entrees["Prix TTC (€)"].insert(0, str(prix_ttc))
@@ -448,6 +461,8 @@ class PrestationManager:
         quantite = self.entrees["Quantité par défaut"].get()
         prix_ht = self.entrees["Prix HT (€)"].get()
         tva = self.entrees["TVA (%)"].get()
+        temps_heures = self.entrees["Heures"].get()
+        temps_minutes = self.entrees["Minutes"].get()
         prix_ttc = self.entrees["Prix TTC (€)"].get()
 
         database.ajouter_prestation(
@@ -459,6 +474,8 @@ class PrestationManager:
         quantite,
         prix_ht,
         tva,
+        temps_heures,
+        temps_minutes,
         prix_ttc)
 
         self.charger_prestations()
@@ -477,6 +494,8 @@ class PrestationManager:
         quantite = self.entrees["Quantité par défaut"].get()
         prix_ht = self.entrees["Prix HT (€)"].get()
         tva = self.entrees["TVA (%)"].get()
+        temps_heures = self.entrees["Heures"].get()
+        temps_minutes = self.entrees["Minutes"].get()
         prix_ttc = self.entrees["Prix TTC (€)"].get()
 
         database.modifier_prestation(
@@ -488,6 +507,8 @@ class PrestationManager:
             quantite,
             prix_ht,
             tva,
+            temps_heures,
+            temps_minutes,
             prix_ttc
         )
 
@@ -512,10 +533,14 @@ class PrestationManager:
                     entree.delete(0, "end")
 
             elif isinstance(entree, ctk.CTkComboBox):
-                entree.set("")
+                if nom == "Heures":
+                    entree.set("0")
+                elif nom == "Minutes":
+                    entree.set("00")
+                else:
+                    entree.set("")
 
-        self.generer_reference()
-
+            self.entrees["Référence"].configure(state="normal")
 
     def supprimer_prestation(self):
 
@@ -593,3 +618,23 @@ class PrestationManager:
 
     def annuler(self):
         self.nouvelle_prestation()    
+
+    def importer_catalogue(self):
+
+        reponse = messagebox.askyesno(
+            "Catalogue FMS",
+            "Importer le catalogue des prestations FMS ?"
+        )
+
+        if not reponse:
+            return
+
+        database.importer_catalogue_fms()
+
+        self.charger_prestations()
+
+        messagebox.showinfo(
+            "FMS Manager",
+            "Catalogue importé avec succès."
+        )
+

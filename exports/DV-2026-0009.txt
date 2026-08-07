@@ -1,0 +1,9 @@
+DEVIS : DV-2026-0009
+Client : VALEMBOIS FREDERIC
+Immatriculation : AA-123-BB
+Date : 05/08/2026
+----------------------------------------
+MONTAGE  AMORTISSEUR  AV | Qté: 2.0 | 50.0 € HT -> 100.0 € HT
+----------------------------------------
+Total HT : 100.00 €
+Total TTC : 100.00 €

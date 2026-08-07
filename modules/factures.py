@@ -578,7 +578,7 @@ class FactureManager:
             self.table_factures.delete(item)
 
         self.cur.execute("""
-            SELECT numero, client, date_facture
+            SELECT numero, client, date
             FROM factures
             ORDER BY id DESC
         """)
